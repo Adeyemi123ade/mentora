@@ -284,7 +284,7 @@ export function MessagesPage() {
 
               <form className="msgs-composer" onSubmit={handleSend}>
                 {students.length > 0 && (
-                  <select value={noteStudentId} onChange={(e) => setNoteStudentId(e.target.value)} className="msgs-student-picker" title="Tag this message about a student">
+                  <select value={noteStudentId} onChange={(e) => setNoteStudentId(e.target.value)} className="msgs-student-picker" title="Tag this message about a child">
                     <option value="">General message</option>
                     {students.map((s) => (
                       <option key={s.id} value={s.id}>About {s.fullName}</option>

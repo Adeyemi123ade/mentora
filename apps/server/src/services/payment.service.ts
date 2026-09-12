@@ -202,6 +202,31 @@ export async function attachBookingToCardPayment(tx: TxClient, reference: string
   }
 }
 
+/**
+ * Refunds a card payment that was verified but never attached to a booking — e.g. the booking's
+ * slot got taken by someone else in the instant between payment verification and booking
+ * creation. The atomic claim below prevents double-refunding if this is ever called twice for
+ * the same reference; a failed Paystack call reverts the claim so the transaction stays visible
+ * for retry instead of being silently marked refunded when it wasn't.
+ */
+export async function refundOrphanedCardPayment(reference: string): Promise<void> {
+  const claimed = await prisma.transaction.updateMany({
+    where: { reference, bookingId: null, status: 'PENDING', source: 'CARD' },
+    data: { status: 'REFUNDED' },
+  });
+  if (claimed.count !== 1) return;
+
+  try {
+    await paystackFetch('/refund', {
+      method: 'POST',
+      body: JSON.stringify({ transaction: reference }),
+    });
+  } catch (err) {
+    await prisma.transaction.update({ where: { reference }, data: { status: 'PENDING' } });
+    throw err;
+  }
+}
+
 export async function chargeWalletForBooking(tx: TxClient, userId: string, bookingId: string, amount: number): Promise<void> {
   const wallet = await tx.wallet.upsert({ where: { userId }, update: {}, create: { userId } });
   if (wallet.balance < amount) {

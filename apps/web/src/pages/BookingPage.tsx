@@ -179,7 +179,7 @@ export function BookingPage() {
   }
 
   const selectedStudent = students?.find((s) => s.id === selectedStudentId) ?? null;
-  const studentFirstName = selectedStudent?.fullName.split(' ')[0] ?? 'your student';
+  const studentFirstName = selectedStudent?.fullName.split(' ')[0] ?? 'your child';
   const slots = selectedDate ? getRealTimeSlotsForDate(realAvailability, selectedDate) : [];
   const visibleSlots = showMoreTimes ? slots : slots.slice(0, INITIAL_SLOT_COUNT);
 
@@ -187,7 +187,7 @@ export function BookingPage() {
   const total = tutor.price + platformFee;
 
   const steps: { key: string; label: string; icon: (p: { className?: string }) => JSX.Element; ref: RefObject<HTMLDivElement> | null; done: boolean }[] = [
-    { key: 'student', label: 'Student', icon: UserFieldIcon, ref: studentSectionRef, done: Boolean(selectedStudent) },
+    { key: 'student', label: 'Child', icon: UserFieldIcon, ref: studentSectionRef, done: Boolean(selectedStudent) },
     { key: 'subject', label: 'Subject / Skill', icon: BookIcon, ref: subjectSectionRef, done: Boolean(subject) },
     { key: 'format', label: 'Format', icon: VideoIcon, ref: formatSectionRef, done: Boolean(format) },
     { key: 'datetime', label: 'Date & Time', icon: CalendarIcon, ref: dateSectionRef, done: Boolean(selectedDate && selectedSlot) },
@@ -339,7 +339,7 @@ export function BookingPage() {
           <div className="booking-summary-list">
             <div className="booking-summary-row">
               <UserFieldIcon />
-              <div><span>Student</span><strong>{selectedStudent.fullName} {selectedStudent.grade ? `(${selectedStudent.grade})` : ''}</strong></div>
+              <div><span>Child</span><strong>{selectedStudent.fullName} {selectedStudent.grade ? `(${selectedStudent.grade})` : ''}</strong></div>
             </div>
             <div className="booking-summary-row">
               <BookIcon />
@@ -418,7 +418,7 @@ export function BookingPage() {
       <div className="booking-layout">
         <div className="booking-main">
           <section className={sectionClassName('student')} ref={studentSectionRef}>
-            <h2 className="booking-section-title"><span className="booking-number">1</span> Select Student</h2>
+            <h2 className="booking-section-title"><span className="booking-number">1</span> Select Child</h2>
 
             {students && students.length > 0 ? (
               <>
@@ -454,12 +454,12 @@ export function BookingPage() {
                     </div>
                   )}
                 </div>
-                <Link to="/onboarding/add-student" className="btn btn-secondary booking-add-student">+ Add Another Student</Link>
+                <Link to="/onboarding/add-student" className="btn btn-secondary booking-add-student">+ Add Another Child</Link>
               </>
             ) : students === null ? null : (
               <div className="mystudents-empty">
-                <p>You need to add a student before booking a session.</p>
-                <Link to="/onboarding/add-student" className="btn btn-primary">Add a Student <span aria-hidden="true">→</span></Link>
+                <p>You need to add a child before booking a session.</p>
+                <Link to="/onboarding/add-student" className="btn btn-primary">Add a Child <span aria-hidden="true">→</span></Link>
               </div>
             )}
           </section>
@@ -625,7 +625,7 @@ export function BookingPage() {
               <div className="booking-summary-row">
                 <UserFieldIcon />
                 <div>
-                  <span>Student</span>
+                  <span>Child</span>
                   <strong>{selectedStudent ? `${selectedStudent.fullName}${selectedStudent.grade ? ` (${selectedStudent.grade})` : ''}` : 'Not selected'}</strong>
                 </div>
               </div>

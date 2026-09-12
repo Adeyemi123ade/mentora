@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
-import type { ReactNode } from 'react';
+import type { ReactNode, FormEvent } from 'react';
 import type { SignupRole, Gender, SkillInterest, Student } from '@mentora/shared';
 import { SIGNUP_ROLES, SKILL_INTERESTS, GENDERS } from '@mentora/shared';
 import studentPortrait from './assets/mentora-avatar.webp';
@@ -12,8 +12,8 @@ import { apiRequest, ApiError } from './lib/api';
 import { AuthProvider, useAuth, roleHome, postAuthDestination } from './context/AuthContext';
 import type { AppRole } from './context/AuthContext';
 import { supabase } from './lib/supabase';
-import { ThemeToggle } from './components/ThemeToggle';
 import { SiteFooter } from './components/SiteFooter';
+import { PasswordCriteria, passwordMeetsCriteria } from './components/PasswordCriteria';
 const DashboardShell = lazy(() => import('./pages/DashboardPage').then((module) => ({ default: module.DashboardShell })));
 const DashboardHomePage = lazy(() => import('./pages/DashboardPage').then((module) => ({ default: module.DashboardHomePage })));
 const MyStudentsPage = lazy(() => import('./pages/MyStudentsPage').then((module) => ({ default: module.MyStudentsPage })));
@@ -108,7 +108,7 @@ function BrandMark() {
   return <img src={mentoraLogo} alt="" aria-hidden="true" className="brand-logo-img" />;
 }
 
-import { Routes, Route, Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { Routes, Route, Link, Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 
 function LandingPage() {
   const courseCarouselRef = useRef<HTMLDivElement>(null);
@@ -349,34 +349,6 @@ function PasswordField({
       </div>
       {error && <span className="field-error-text" role="alert">{error}</span>}
     </label>
-  );
-}
-
-const PASSWORD_RULES: { key: string; label: string; test: (p: string) => boolean }[] = [
-  { key: 'length', label: 'At least 8 characters', test: (p) => p.length >= 8 },
-  { key: 'upper', label: 'One uppercase letter', test: (p) => /[A-Z]/.test(p) },
-  { key: 'lower', label: 'One lowercase letter', test: (p) => /[a-z]/.test(p) },
-  { key: 'number', label: 'One number', test: (p) => /[0-9]/.test(p) },
-  { key: 'special', label: 'One special character', test: (p) => /[^A-Za-z0-9]/.test(p) },
-];
-
-function passwordMeetsCriteria(password: string): boolean {
-  return PASSWORD_RULES.every((rule) => rule.test(password));
-}
-
-function PasswordCriteria({ password }: { password: string }) {
-  return (
-    <ul className="password-criteria">
-      {PASSWORD_RULES.map((rule) => {
-        const met = rule.test(password);
-        return (
-          <li key={rule.key} className={met ? 'met' : ''}>
-            <span aria-hidden="true">{met ? '✓' : '○'}</span>
-            {rule.label}
-          </li>
-        );
-      })}
-    </ul>
   );
 }
 
@@ -911,14 +883,50 @@ function OAuthCallbackPage() {
   const navigate = useNavigate();
   const { refreshUser } = useAuth();
   const started = useRef(false);
-  const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
+  const [status, setStatus] = useState<'processing' | 'set-password' | 'success' | 'error'>('processing');
   const [message, setMessage] = useState('Completing your Google sign-in...');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [settingPassword, setSettingPassword] = useState(false);
+  const passwordMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+
+  async function finishSignIn() {
+    const profile = await refreshUser();
+    if (!profile) throw new Error('Your Mentora profile could not be loaded.');
+    const destination = await postAuthDestination(profile);
+    setStatus('success');
+    setMessage('Sign-in successful. Taking you to your account...');
+    setTimeout(() => navigate(destination, { replace: true }), 900);
+  }
+
+  async function handleSetPassword(e: FormEvent) {
+    e.preventDefault();
+    if (!passwordMeetsCriteria(newPassword)) {
+      setPasswordError('Password must be at least 8 characters and include uppercase, lowercase, a number, and a special character.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match.');
+      return;
+    }
+    setPasswordError(null);
+    setSettingPassword(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+      await finishSignIn();
+    } catch (err) {
+      setPasswordError(readableAuthError(err, 'Could not set your password. Please try again.'));
+    } finally {
+      setSettingPassword(false);
+    }
+  }
 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
 
-    let timer: ReturnType<typeof setTimeout> | undefined;
     void (async () => {
       try {
         const { data, error } = await supabase.auth.getSession();
@@ -928,19 +936,18 @@ function OAuthCallbackPage() {
         const profile = await refreshUser();
         if (!profile) throw new Error('Your Mentora profile could not be loaded.');
 
-        const destination = await postAuthDestination(profile);
-        setStatus('success');
-        setMessage('Sign-in successful. Taking you to your account...');
-        timer = setTimeout(() => navigate(destination, { replace: true }), 900);
+        if (!profile.hasPassword) {
+          setStatus('set-password');
+          setMessage('One last step — set a password so you can also sign in directly with your email next time.');
+          return;
+        }
+
+        await finishSignIn();
       } catch (err) {
         setStatus('error');
         setMessage(readableAuthError(err, 'We could not complete your Google sign-in. Please try again.'));
       }
     })();
-
-    return () => {
-      if (timer) clearTimeout(timer);
-    };
     // Run once for this callback URL. Auth helpers are intentionally captured
     // from the mounted provider so status renders cannot restart the exchange.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -961,11 +968,20 @@ function OAuthCallbackPage() {
                 {status === 'success' ? <CheckIcon /> : status === 'error' ? <ShieldCheckIcon /> : <GoogleIcon />}
               </span>
               <div>
-                <h2>{status === 'success' ? 'Sign-in successful' : status === 'error' ? 'Google sign-in failed' : 'Signing you in'}</h2>
+                <h2>{status === 'success' ? 'Sign-in successful' : status === 'error' ? 'Google sign-in failed' : status === 'set-password' ? 'Set your password' : 'Signing you in'}</h2>
                 <p>{message}</p>
               </div>
             </div>
             {status === 'processing' && <span className="spinner" aria-hidden="true" />}
+            {status === 'set-password' && (
+              <form onSubmit={handleSetPassword} className="mystudents-edit-form">
+                <PasswordField label="Password" name="password" placeholder="Create a password" required minLength={8} value={newPassword} onChange={setNewPassword} />
+                <PasswordCriteria password={newPassword} />
+                <PasswordField label="Confirm password" name="confirmPassword" placeholder="Confirm your password" required minLength={8} value={confirmPassword} onChange={setConfirmPassword} error={passwordMismatch ? 'Passwords do not match' : undefined} />
+                {passwordError && <p className="photo-uploader-error">{passwordError}</p>}
+                <button type="submit" className="btn btn-primary full" disabled={settingPassword}>{settingPassword ? 'Saving…' : 'Set Password & Continue'}</button>
+              </form>
+            )}
             {status === 'error' && <Link to="/login" className="btn btn-primary full">Back to sign in</Link>}
           </div>
         </div>
@@ -1244,8 +1260,14 @@ function ResetPasswordPage() {
 }
 
 function AcceptInvitePage() {
-  const { user, refreshUser } = useAuth();
+  const { signIn } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get('token') ?? '';
+
+  const [status, setStatus] = useState<'checking' | 'ready' | 'invalid'>('checking');
+  const [invalidMessage, setInvalidMessage] = useState('This invite link is invalid.');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -1254,11 +1276,29 @@ function AcceptInvitePage() {
   const passwordMismatch = confirmPassword.length > 0 && password !== confirmPassword;
 
   useEffect(() => {
-    if (!user) {
-      void refreshUser();
+    let active = true;
+    if (!token) {
+      setInvalidMessage('This invite link is missing or malformed.');
+      setStatus('invalid');
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    (async () => {
+      try {
+        const res = await apiRequest<{ email: string }>(`/api/admin/invites/verify?token=${encodeURIComponent(token)}`);
+        if (!active) return;
+        if (!res.data) throw new Error('This invite link is invalid or has expired.');
+        setEmail(res.data.email);
+        setStatus('ready');
+      } catch (err) {
+        if (!active) return;
+        setInvalidMessage(err instanceof ApiError ? err.message : 'This invite link is invalid or has expired.');
+        setStatus('invalid');
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [token]);
 
   async function handleSubmit(e: any) {
     e.preventDefault();
@@ -1275,13 +1315,11 @@ function AcceptInvitePage() {
 
     setSubmitting(true);
     try {
-      const { error: updateError } = await supabase.auth.updateUser({ password });
-      if (updateError) throw updateError;
-      const profile = await refreshUser();
-      if (!profile) throw new Error('Your account could not be set up. Please try the invite link again.');
-      navigate(await postAuthDestination(profile), { replace: true });
+      await apiRequest('/api/admin/invites/accept', { method: 'POST', body: JSON.stringify({ token, password }) });
+      await signIn(email, password);
+      navigate('/admin', { replace: true });
     } catch (err) {
-      setError(readableAuthError(err, 'Could not accept the invite. Please try again.'));
+      setError(err instanceof ApiError ? err.message : readableAuthError(err, 'Could not activate your account. Please try again.'));
     } finally {
       setSubmitting(false);
     }
@@ -1300,7 +1338,7 @@ function AcceptInvitePage() {
 
           <div className="verify-tip">
             <span className="verify-tip-icon"><ShieldCheckIcon /></span>
-            <span>This invite link is single-use and tied to your email address.</span>
+            <span>This invite link is single-use and expires 10 minutes after it's sent.</span>
           </div>
 
           <div className="auth-side-footer">
@@ -1309,22 +1347,40 @@ function AcceptInvitePage() {
         </div>
 
         <div className="auth-main">
-          <form className="login-form" onSubmit={handleSubmit}>
-            <h2>Set your password</h2>
-            <p>Choose a password to finish accepting your admin invite.</p>
+          {status === 'checking' && (
+            <div className="auth-loading">
+              <span className="spinner" aria-hidden="true" />
+              <span>Checking your invite…</span>
+            </div>
+          )}
 
-            <PasswordField label="Password" name="password" placeholder="Create a password" required minLength={8} value={password} onChange={setPassword} />
-            <PasswordCriteria password={password} />
-            <PasswordStrengthMeter password={password} />
-            <PasswordField label="Confirm password" name="confirmPassword" placeholder="Confirm your password" required minLength={8} value={confirmPassword} onChange={setConfirmPassword} error={passwordMismatch ? 'Passwords do not match' : undefined} />
+          {status === 'invalid' && (
+            <div className="login-form">
+              <h2>This invite link isn't valid</h2>
+              <p>{invalidMessage}</p>
+              <p>Ask an admin to send you a new invite from the Admins section of the dashboard.</p>
+              <Link className="btn btn-secondary full" to="/login">Back to sign in</Link>
+            </div>
+          )}
 
-            {error && <p className="form-error" role="alert">{error}</p>}
+          {status === 'ready' && (
+            <form className="login-form" onSubmit={handleSubmit}>
+              <h2>Set your password</h2>
+              <p>Setting up the administrator account for <strong>{email}</strong>.</p>
 
-            <button className="btn btn-primary full" type="submit" disabled={submitting || !user}>
-              {submitting && <span className="spinner" aria-hidden="true" />}
-              {submitting ? 'Setting up…' : user ? 'Activate account' : 'Loading…'}
-            </button>
-          </form>
+              <PasswordField label="Password" name="password" placeholder="Create a password" required minLength={8} value={password} onChange={setPassword} />
+              <PasswordCriteria password={password} />
+              <PasswordStrengthMeter password={password} />
+              <PasswordField label="Confirm password" name="confirmPassword" placeholder="Confirm your password" required minLength={8} value={confirmPassword} onChange={setConfirmPassword} error={passwordMismatch ? 'Passwords do not match' : undefined} />
+
+              {error && <p className="form-error" role="alert">{error}</p>}
+
+              <button className="btn btn-primary full" type="submit" disabled={submitting}>
+                {submitting && <span className="spinner" aria-hidden="true" />}
+                {submitting ? 'Setting up…' : 'Activate account'}
+              </button>
+            </form>
+          )}
         </div>
       </div>
     </main>
@@ -1358,7 +1414,7 @@ function RequireAuth({ role, children }: { role?: AppRole; children: ReactNode }
   return <>{children}</>;
 }
 
-const ONBOARDING_STEPS = ['Create Account', 'Verify Email', 'Add Student', 'Explore Tutors'];
+const ONBOARDING_STEPS = ['Create Account', 'Verify Email', 'Add Child', 'Explore Tutors'];
 
 function OnboardingStepper({ currentStep }: { currentStep: number }) {
   return (
@@ -1479,8 +1535,8 @@ function AddStudentPage() {
     const fullName = String(form.get('fullName') ?? '');
 
     const nextFieldErrors: Record<string, string> = {};
-    if (isBlank(fullName)) nextFieldErrors.fullName = 'Please enter the student\u2019s full name.';
-    if (isBlank(age)) nextFieldErrors.age = 'Please select the student\u2019s age.';
+    if (isBlank(fullName)) nextFieldErrors.fullName = 'Please enter your child\u2019s full name.';
+    if (isBlank(age)) nextFieldErrors.age = 'Please select your child\u2019s age.';
     if (interests.length === 0) nextFieldErrors.interests = 'Please select at least one skill interest.';
     if (!passwordMeetsCriteria(studentPassword)) nextFieldErrors.studentPassword = 'Use at least 8 characters with uppercase, lowercase, a number, and a special character.';
     setFieldErrors(nextFieldErrors);
@@ -1506,7 +1562,7 @@ function AddStudentPage() {
       setCreatedStudent(student);
       if (student) sessionStorage.setItem(ADD_STUDENT_SESSION_KEY, student.id);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not create the student profile. Please try again.');
+      setError(err instanceof ApiError ? err.message : 'Could not create the child profile. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -1524,12 +1580,12 @@ function AddStudentPage() {
 
       <div className="auth-shell">
         <div className="auth-side">
-          <h1>Let's add<br />your first <span className="accent">student</span></h1>
-          <p>Tell us about your student so we can recommend the best tutors and learning experiences.</p>
+          <h1>Let's add<br />your first <span className="accent">child</span></h1>
+          <p>Tell us about your child so we can recommend the best tutors and learning experiences.</p>
 
           <div className="verify-tip">
             <span className="verify-tip-icon"><UsersIcon /></span>
-            <span className="verify-tip-text">You can always add more students later from your dashboard.</span>
+            <span className="verify-tip-text">You can always add more children later from your dashboard.</span>
           </div>
 
           <div className="auth-illustration onboarding-illustration">
@@ -1551,22 +1607,22 @@ function AddStudentPage() {
           {createdStudent ? (
             <div className="add-student-form student-access-success">
               <span className="verify-icon-circle success"><CheckIcon /></span>
-              <h2>Student profile created</h2>
-              <p>Give this Student ID and the password you created to {createdStudent.fullName}. No administrator approval is required.</p>
-              <div className="student-login-id-result"><span>Student ID</span><strong>{createdStudent.loginId}</strong><button type="button" className="btn btn-secondary" onClick={copyStudentId}>{idCopied ? 'Copied' : 'Copy ID'}</button></div>
-              <p className="field-hint">For security, Mentora will not display the password again. You can reset it from My Students.</p>
+              <h2>Child profile created</h2>
+              <p>Give this Child ID and the password you created to {createdStudent.fullName}. No administrator approval is required.</p>
+              <div className="student-login-id-result"><span>Child ID</span><strong>{createdStudent.loginId}</strong><button type="button" className="btn btn-secondary" onClick={copyStudentId}>{idCopied ? 'Copied' : 'Copy ID'}</button></div>
+              <p className="field-hint">For security, Mentora will not display the password again. You can reset it from My Children.</p>
               <button type="button" className="btn btn-primary full" onClick={() => { sessionStorage.removeItem(ADD_STUDENT_SESSION_KEY); navigate('/dashboard'); }}>Continue to dashboard</button>
             </div>
           ) : <form className="add-student-form" onSubmit={handleSubmit}>
             <div className="verify-header">
               <span className="verify-icon-circle"><UsersPlusIcon /></span>
               <div>
-                <h2>Add your first student</h2>
+                <h2>Add your first child</h2>
                 <p>This helps us connect them with the right tutors and learning opportunities.</p>
               </div>
             </div>
 
-            <IconInputField icon={<UserFieldIcon className="input-icon" />} label="Student full name" name="fullName" placeholder="Enter student full name" required error={fieldErrors.fullName} />
+            <IconInputField icon={<UserFieldIcon className="input-icon" />} label="Child's full name" name="fullName" placeholder="Enter your child's full name" required error={fieldErrors.fullName} />
 
             <div className="form-row-2col">
               <label className={`field ${fieldErrors.age ? 'field-invalid' : ''}`}>
@@ -1627,9 +1683,9 @@ function AddStudentPage() {
               ))}
             </div>
             {fieldErrors.interests && <span className="field-error-text" role="alert">{fieldErrors.interests}</span>}
-            <span className="field-hint">You can update these interests anytime from the student profile.</span>
+            <span className="field-hint">You can update these interests anytime from the child's profile.</span>
 
-            <PasswordField label="Student password" name="studentPassword" placeholder="Create the student's password" required minLength={8} value={studentPassword} onChange={(value) => { setStudentPassword(value); setFieldErrors((current) => ({ ...current, studentPassword: '' })); }} error={fieldErrors.studentPassword} />
+            <PasswordField label="Child's password" name="studentPassword" placeholder="Create your child's password" required minLength={8} value={studentPassword} onChange={(value) => { setStudentPassword(value); setFieldErrors((current) => ({ ...current, studentPassword: '' })); }} error={fieldErrors.studentPassword} />
             <PasswordCriteria password={studentPassword} />
             <p className="field-hint">Only you can reset this password from your parent account.</p>
 
@@ -1642,7 +1698,7 @@ function AddStudentPage() {
 
             <button className="btn btn-primary full google-btn" type="submit" disabled={submitting}>
               {submitting && <span className="spinner" aria-hidden="true" />}
-              <UsersPlusIcon /> {submitting ? 'Creating…' : 'Create Student Profile'}
+              <UsersPlusIcon /> {submitting ? 'Creating…' : 'Create Child Profile'}
             </button>
 
             <div className="or-row">or</div>
@@ -1651,7 +1707,7 @@ function AddStudentPage() {
               <EyeIcon /> Skip for now
             </button>
 
-            <p className="auth-switch">You can add a student later and still explore tutors.</p>
+            <p className="auth-switch">You can add a child later and still explore tutors.</p>
           </form>}
         </div>
       </div>
@@ -1682,7 +1738,6 @@ function SiteLayout({ children }: { children: ReactNode }) {
         </nav>
 
         <div className="auth-actions">
-          <ThemeToggle />
           <Link to="/login" className="btn btn-ghost desktop-auth-action">Log in</Link>
           <Link to="/login?mode=signup&role=PARENT" className="btn btn-primary desktop-auth-action">Sign up</Link>
           <button
@@ -1714,7 +1769,23 @@ function SiteLayout({ children }: { children: ReactNode }) {
   );
 }
 
+// Dark mode is only ever reachable from inside the authenticated app shells (dashboard,
+// tutor, student, admin) — everything before that (landing, login, signup, verify, onboarding)
+// stays light regardless of a theme previously chosen inside the dashboard, since none of
+// those pre-dashboard pages render a theme toggle to switch back.
+const DASHBOARD_PATH_PREFIXES = ['/dashboard', '/tutor', '/student', '/admin'];
+
 function App() {
+  const location = useLocation();
+  useEffect(() => {
+    const isDashboardRoute = DASHBOARD_PATH_PREFIXES.some(
+      (prefix) => location.pathname === prefix || location.pathname.startsWith(`${prefix}/`),
+    );
+    if (!isDashboardRoute) {
+      document.documentElement.setAttribute('data-theme', 'light');
+    }
+  }, [location.pathname]);
+
   return (
     <AuthProvider>
       <Suspense fallback={<main className="auth-loading"><div className="spinner" aria-label="Loading page" /></main>}>
@@ -1746,7 +1817,7 @@ function App() {
         <Route path="/tutor/earnings" element={<RequireAuth role="TUTOR"><TutorDashboardShell><TutorEarningsPage /></TutorDashboardShell></RequireAuth>} />
         <Route path="/tutor/reviews" element={<RequireAuth role="TUTOR"><TutorDashboardShell><TutorReviewsPage /></TutorDashboardShell></RequireAuth>} />
         <Route path="/tutor/profile" element={<RequireAuth role="TUTOR"><TutorDashboardShell><TutorProfileOverviewPage /></TutorDashboardShell></RequireAuth>} />
-        <Route path="/tutor/profile/edit" element={<RequireAuth role="TUTOR"><TutorDashboardShell><TutorCompleteProfilePage editMode /></TutorDashboardShell></RequireAuth>} />
+        <Route path="/tutor/profile/edit" element={<RequireAuth role="TUTOR"><TutorCompleteProfilePage editMode /></RequireAuth>} />
         <Route path="/tutor/settings" element={<RequireAuth role="TUTOR"><TutorDashboardShell><TutorSettingsPage /></TutorDashboardShell></RequireAuth>} />
         <Route path="/tutor/notifications" element={<RequireAuth role="TUTOR"><TutorDashboardShell><NotificationsPage /></TutorDashboardShell></RequireAuth>} />
         <Route path="/onboarding/tutor-profile" element={<RequireAuth role="TUTOR"><TutorCompleteProfilePage /></RequireAuth>} />
@@ -1763,7 +1834,7 @@ function App() {
         <Route path="/student/progress" element={<RequireAuth role="STUDENT"><StudentShell><StudentProgressPage /></StudentShell></RequireAuth>} />
         <Route path="/student/notifications" element={<RequireAuth role="STUDENT"><StudentShell><StudentNotificationsPage /></StudentShell></RequireAuth>} />
         <Route path="/student/profile" element={<RequireAuth role="STUDENT"><StudentShell><StudentProfilePage /></StudentShell></RequireAuth>} />
-        <Route path="/student/settings" element={<RequireAuth role="STUDENT"><StudentSettingsPage /></RequireAuth>} />
+        <Route path="/student/settings" element={<RequireAuth role="STUDENT"><StudentShell><StudentSettingsPage /></StudentShell></RequireAuth>} />
         <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </Suspense>

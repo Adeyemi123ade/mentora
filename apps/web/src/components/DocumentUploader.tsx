@@ -75,11 +75,18 @@ export function DocumentUploader({
       >
         <input ref={inputRef} type="file" accept="image/*,.pdf" hidden onChange={handleFile} />
         {fileUrl ? (
-          <>
-            <CheckIcon className="tutor-upload-check" />
-            <strong>{label} uploaded</strong>
-            <span className="tutor-upload-remove" onClick={handleRemove}>Remove &amp; replace</span>
-          </>
+          kind === 'photo' ? (
+            <>
+              <img src={fileUrl} alt="" className="tutor-upload-photo-preview" />
+              <span className="tutor-upload-remove" onClick={handleRemove}>Remove &amp; replace</span>
+            </>
+          ) : (
+            <>
+              <CheckIcon className="tutor-upload-check" />
+              <strong>{label} uploaded</strong>
+              <span className="tutor-upload-remove" onClick={handleRemove}>Remove &amp; replace</span>
+            </>
+          )
         ) : (
           <>
             {icon ?? <UploadCloudIcon />}

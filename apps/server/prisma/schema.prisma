@@ -15,6 +15,7 @@ model User {
   name              String
   role              Role               @default(STUDENT)
   emailVerified     Boolean            @default(false)
+  hasPassword       Boolean            @default(false)
   photoUrl          String?
   phone             String?
   location          String?
@@ -559,6 +560,8 @@ model AdminInvite {
   invitedById String
   invitedBy   User              @relation("AdminInviter", fields: [invitedById], references: [id])
   status      AdminInviteStatus @default(PENDING)
+  token       String?           @unique
+  expiresAt   DateTime?
   acceptedAt  DateTime?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt

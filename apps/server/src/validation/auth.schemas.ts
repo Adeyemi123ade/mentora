@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { SIGNUP_ROLES } from '@mentora/shared';
 
-const PASSWORD_PATTERN =
+export const PASSWORD_PATTERN =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
 
 export const resetPasswordSchema = z.object({

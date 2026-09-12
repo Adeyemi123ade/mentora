@@ -7,6 +7,7 @@ import { apiRequest, ApiError } from '../lib/api';
 import { Avatar } from '../components/Avatar';
 import { PhotoUploader } from '../components/PhotoUploader';
 import { Modal } from '../components/Modal';
+import { PasswordCriteria, passwordMeetsCriteria } from '../components/PasswordCriteria';
 import {
   GraduationCapIcon,
   BookIcon,
@@ -156,16 +157,16 @@ export function MyStudentsPage() {
     <div className="mystudents-page">
       <div className="mystudents-header">
         <div>
-          <h1>My Students</h1>
+          <h1>My Children</h1>
           <p>Manage your children's profiles, learning goals and progress.</p>
         </div>
-        <Link to="/onboarding/add-student" className="btn btn-primary">+ Add Student</Link>
+        <Link to="/onboarding/add-student" className="btn btn-primary">+ Add Child</Link>
       </div>
 
       <div className="mystudents-stats-grid">
         <div className="mystudents-stat-card">
           <span className="mystudents-stat-icon tone-blue"><GraduationCapIcon /></span>
-          <div><strong>{stats.studentsCount}</strong><span>Students</span><em>Active profiles</em></div>
+          <div><strong>{stats.studentsCount}</strong><span>Children</span><em>Active profiles</em></div>
         </div>
         <div className="mystudents-stat-card">
           <span className="mystudents-stat-icon tone-green"><BookIcon /></span>
@@ -173,7 +174,7 @@ export function MyStudentsPage() {
         </div>
         <div className="mystudents-stat-card">
           <span className="mystudents-stat-icon tone-purple"><ChartIcon /></span>
-          <div><strong>{stats.avgProgress ?? '—'}{stats.avgProgress !== null ? '%' : ''}</strong><span>Avg. Progress</span><em>Across all students</em></div>
+          <div><strong>{stats.avgProgress ?? '—'}{stats.avgProgress !== null ? '%' : ''}</strong><span>Avg. Progress</span><em>Across all children</em></div>
         </div>
         <div className="mystudents-stat-card">
           <span className="mystudents-stat-icon tone-orange"><StarIcon /></span>
@@ -183,8 +184,8 @@ export function MyStudentsPage() {
 
       {students === null ? null : students.length === 0 ? (
         <div className="mystudents-empty">
-          <p>You haven't added a student yet.</p>
-          <Link to="/onboarding/add-student" className="btn btn-primary">Add a Student <span aria-hidden="true">→</span></Link>
+          <p>You haven't added a child yet.</p>
+          <Link to="/onboarding/add-student" className="btn btn-primary">Add a Child <span aria-hidden="true">→</span></Link>
         </div>
       ) : (
         <div className="mystudents-list">
@@ -195,13 +196,12 @@ export function MyStudentsPage() {
 
             return (
               <article key={student.id} id={student.id} className={student.id === highlightedId ? 'mystudents-card highlight' : 'mystudents-card'}>
-                <button type="button" className="mystudents-menu-trigger" onClick={() => setOpenMenuId(openMenuId === student.id ? null : student.id)} aria-label="Student actions">
+                <button type="button" className="mystudents-menu-trigger" onClick={() => setOpenMenuId(openMenuId === student.id ? null : student.id)} aria-label="Child actions">
                   <DotsIcon />
                 </button>
                 {openMenuId === student.id && (
                   <div className="mystudents-menu" role="menu">
                     <button type="button" role="menuitem" onClick={() => { setEditingStudent(student); setOpenMenuId(null); }}><EditIcon /> Edit Profile</button>
-                    <button type="button" role="menuitem" onClick={() => { setPasswordStudent(student); setOpenMenuId(null); }}><LockIcon /> Reset Student Password</button>
                     <a role="menuitem" href="#learning-goals" onClick={() => setOpenMenuId(null)}><TargetIcon /> Learning Goals</a>
                     <a role="menuitem" href="#learning-goals" onClick={() => setOpenMenuId(null)}><ChartIcon /> View Progress</a>
                     <Link role="menuitem" to="/dashboard/messages" onClick={() => setOpenMenuId(null)}><ChatIcon /> Message Tutors</Link>
@@ -225,10 +225,15 @@ export function MyStudentsPage() {
                   <span className="mystudents-agegender">
                     {student.age ? `Age ${student.age}` : 'Age not set'} · {GENDER_LABELS[student.gender] ?? student.gender}
                   </span>
-                  <span className="mystudents-login-id">Student ID: <strong>{student.loginId}</strong></span>
-                  <button type="button" className="mystudents-view-link" onClick={() => setEditingStudent(student)}>
-                    View Full Profile <span aria-hidden="true">→</span>
-                  </button>
+                  <span className="mystudents-login-id">Child ID: <strong>{student.loginId}</strong></span>
+                  <div className="mystudents-card-actions">
+                    <button type="button" className="mystudents-view-link" onClick={() => setEditingStudent(student)}>
+                      View Full Profile <span aria-hidden="true">→</span>
+                    </button>
+                    <button type="button" className="mystudents-view-link" onClick={() => setPasswordStudent(student)}>
+                      <LockIcon /> Reset Password
+                    </button>
+                  </div>
                 </div>
 
                 <div className="mystudents-col mystudents-col-progress">
@@ -375,24 +380,33 @@ function ResetStudentPasswordModal({ student, onClose }: { student: Student; onC
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const valid = password.length >= 8 && /[A-Z]/.test(password) && /[a-z]/.test(password) && /[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password);
+  const [done, setDone] = useState(false);
+  const mismatch = confirm.length > 0 && password !== confirm;
   async function submit(event: FormEvent) {
     event.preventDefault(); setError('');
-    if (!valid) { setError('Use at least 8 characters with uppercase, lowercase, a number, and a special character.'); return; }
+    if (!passwordMeetsCriteria(password)) { setError('Use at least 8 characters with uppercase, lowercase, a number, and a special character.'); return; }
     if (password !== confirm) { setError('Passwords do not match'); return; }
     setSubmitting(true);
-    try { await apiRequest(`/api/students/${student.id}/reset-password`, { method: 'POST', body: JSON.stringify({ password }) }); onClose(); }
+    try { await apiRequest(`/api/students/${student.id}/reset-password`, { method: 'POST', body: JSON.stringify({ password }) }); setDone(true); }
     catch (err) { setError(err instanceof Error ? err.message : 'Could not reset the password.'); }
     finally { setSubmitting(false); }
   }
   return <Modal title={`Reset ${student.fullName.split(' ')[0]}'s Password`} onClose={onClose}>
-    <form onSubmit={submit} className="mystudents-password-form">
-      <p>Student ID: <strong>{student.loginId}</strong></p>
-      <label><span>New password</span><input type="password" value={password} onChange={(event)=>setPassword(event.target.value)} autoComplete="new-password" /></label>
-      <label><span>Confirm password</span><input className={confirm && password !== confirm ? 'invalid' : ''} type="password" value={confirm} onChange={(event)=>setConfirm(event.target.value)} autoComplete="new-password" />{confirm && password !== confirm && <small>Passwords do not match</small>}</label>
-      {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="btn btn-primary full" disabled={submitting}>{submitting && <span className="spinner" />}{submitting ? 'Updating...' : 'Update Student Password'}</button>
-    </form>
+    {done ? (
+      <div className="mystudents-password-form">
+        <p className="booking-section-hint">{student.fullName.split(' ')[0]}'s password has been updated. Give them the new password to sign in.</p>
+        <button type="button" className="btn btn-primary full" onClick={onClose}>Done</button>
+      </div>
+    ) : (
+      <form onSubmit={submit} className="mystudents-password-form">
+        <p>Child ID: <strong>{student.loginId}</strong></p>
+        <label><span>New password</span><input type="password" value={password} onChange={(event)=>setPassword(event.target.value)} autoComplete="new-password" /></label>
+        <PasswordCriteria password={password} />
+        <label className={mismatch ? 'field-invalid' : ''}><span>Confirm password</span><input className={mismatch ? 'invalid' : ''} type="password" value={confirm} onChange={(event)=>setConfirm(event.target.value)} autoComplete="new-password" aria-invalid={mismatch} />{mismatch && <small>Passwords do not match</small>}</label>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <button className="btn btn-primary full" disabled={submitting}>{submitting && <span className="spinner" />}{submitting ? 'Updating...' : "Update Child's Password"}</button>
+      </form>
+    )}
   </Modal>;
 }
 
@@ -561,7 +575,7 @@ function GoalModal({
       <form onSubmit={handleSubmit} className="mystudents-edit-form">
         {mode === 'add' && (
           <label className="field">
-            <span>Student</span>
+            <span>Child</span>
             <select value={studentId} onChange={(e) => setStudentId(e.target.value)} required>
               {students.map((s) => <option key={s.id} value={s.id}>{s.fullName}</option>)}
             </select>

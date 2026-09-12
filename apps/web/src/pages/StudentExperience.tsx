@@ -3,12 +3,13 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import type { Booking, MeetingInfo, Notification, StudentOverview, StudentProgressSummary } from '@mentora/shared';
 import mentoraLogo from '../assets/mentora-logo.jpg';
 import learningBooks from '../assets/student-learning-books.png';
-import { apiRequest, logout } from '../lib/api';
+import { apiRequest } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { Avatar } from '../components/Avatar';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { ReferralModal } from '../components/ReferralModal';
 import { Modal } from '../components/Modal';
+import { LogoutButton } from '../components/LogoutButton';
 import {
   BellIcon, BookIcon, CalendarIcon, ChartIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon,
   ClockIcon, GraduationCapIcon, HelpCircleIcon, HomeIcon, LightbulbIcon, LockIcon, LogOutIcon,
@@ -72,6 +73,10 @@ function StudentTopbar({ onMenu }: { onMenu: () => void }) {
   return (
     <header className="student-topbar">
       <button className="student-menu-button" type="button" aria-label="Open navigation" onClick={onMenu}><MenuIcon /></button>
+      <Link to="/student" className="student-topbar-brand">
+        <img src={mentoraLogo} alt="" aria-hidden="true" className="brand-logo-img" />
+        <span>Mentora</span>
+      </Link>
       <form onSubmit={(event) => { event.preventDefault(); navigate(`/student/resources?q=${encodeURIComponent(query)}`); }} role="search" className="student-global-search">
         <SearchIcon /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search lessons and resources..." aria-label="Search lessons and resources" />
       </form>
@@ -79,7 +84,7 @@ function StudentTopbar({ onMenu }: { onMenu: () => void }) {
       <ThemeToggle />
       <Link to="/student/profile" className="student-top-profile">
         <Avatar name={user?.name ?? 'Student'} photoUrl={user?.photoUrl} className="student-top-avatar" />
-        <span><strong>{user?.name ?? 'Student'}</strong><small>Student</small></span><ChevronDownIcon />
+        <ChevronDownIcon />
       </Link>
     </header>
   );
@@ -96,7 +101,7 @@ export function StudentShell({ children }: { children: ReactNode }) {
     <div className="student-layout">
       {open && <button type="button" className="student-sidebar-backdrop" aria-label="Close navigation" onClick={() => setOpen(false)} />}
       <aside className={`student-sidebar ${open ? 'open' : ''}`}>
-        <div className="student-brand"><img src={mentoraLogo} alt="" /><strong>Mentora</strong><button type="button" onClick={() => setOpen(false)} aria-label="Close navigation"><XIcon /></button></div>
+        <div className="student-brand"><button type="button" onClick={() => setOpen(false)} aria-label="Close navigation"><XIcon /></button></div>
         <nav aria-label="Student navigation">
           {STUDENT_NAV.map((item) => {
             const Icon = item.icon;
@@ -107,7 +112,7 @@ export function StudentShell({ children }: { children: ReactNode }) {
         <div className="student-sidebar-bottom">
           <div className="student-encouragement"><TrophyIcon /><strong>Keep learning!</strong><p>Consistent effort builds progress.</p><div><span style={{ width: `${data?.overallProgress ?? 0}%` }} /></div><small>{data?.overallProgress ?? 0}% complete</small></div>
           <Link to="/student/profile" className="student-identity"><Avatar name={user?.name ?? 'Student'} photoUrl={data?.student.photoUrl ?? user?.photoUrl} className="student-side-avatar" /><span><strong>{user?.name ?? 'Student'}</strong><small>Student</small></span></Link>
-          <button type="button" className="btn btn-secondary full" onClick={() => logout(navigate)}><LogOutIcon /> Sign out</button>
+          <LogoutButton className="btn btn-secondary full"><LogOutIcon /> Sign out</LogoutButton>
         </div>
       </aside>
       <div className="student-main"><StudentTopbar onMenu={() => setOpen(true)} /><main className="student-content">{children}</main></div>
@@ -208,10 +213,14 @@ export function StudentLessonDetailsPage() {
   return <><Link to="/student/lessons" className="student-back-link"><ChevronLeftIcon /> Back to lessons</Link><section className="student-panel student-detail"><div className="student-card-icon"><GraduationCapIcon /></div><h1>{lesson.subject}</h1><p>{lesson.specificTopic || 'No lesson topic has been added yet.'}</p><dl><div><dt>Tutor</dt><dd>{lesson.tutorName}</dd></div><div><dt>Date</dt><dd>{formatLessonDate(lesson.date)}</dd></div><div><dt>Time</dt><dd>{lesson.startTime} - {lesson.endTime}</dd></div><div><dt>Format</dt><dd>{lesson.format.replaceAll('_',' ')}</dd></div><div><dt>Status</dt><dd>{lesson.status}</dd></div></dl>{lesson.status === 'CONFIRMED' && <MeetingAccessButton bookingId={lesson.id} />}<p className="student-muted-note">For changes or communication with the tutor, please ask your parent.</p></section></>;
 }
 
+type StudentResource = { id: string; title: string; description?: string; url?: string };
+
 export function StudentResourcesPage() {
   const [query, setQuery] = useState(new URLSearchParams(location.search).get('q') ?? ''); const [loading, setLoading] = useState(true);
-  useEffect(() => { apiRequest('/api/student/resources').finally(() => setLoading(false)); }, []);
-  return <><div className="student-page-heading"><div><h1>Learning Resources</h1><p>Materials shared to support your lessons will appear here.</p></div></div><div className="student-filter-row"><label><SearchIcon /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search resources..." /></label><select aria-label="Subject filter"><option>All subjects</option></select><select aria-label="Resource type filter"><option>All types</option></select></div><section className="student-panel">{loading ? <StatePanel>Loading resources...</StatePanel> : <StatePanel><BookIcon /><h2>No learning resources yet</h2><p>Your tutor can provide resources through your parent-managed learning arrangement.</p></StatePanel>}</section></>;
+  const [resources, setResources] = useState<StudentResource[]>([]); const [supported, setSupported] = useState(false);
+  useEffect(() => { apiRequest<{ resources: StudentResource[]; supported: boolean }>('/api/student/resources').then((res) => { setResources(res.data?.resources ?? []); setSupported(Boolean(res.data?.supported)); }).finally(() => setLoading(false)); }, []);
+  const visible = resources.filter((r) => r.title.toLowerCase().includes(query.toLowerCase()));
+  return <><div className="student-page-heading"><div><h1>Learning Resources</h1><p>Materials shared to support your lessons will appear here.</p></div></div><div className="student-filter-row"><label><SearchIcon /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search resources..." /></label><select aria-label="Subject filter"><option>All subjects</option></select><select aria-label="Resource type filter"><option>All types</option></select></div><section className="student-panel">{loading ? <StatePanel>Loading resources...</StatePanel> : !supported || !visible.length ? <StatePanel><BookIcon /><h2>No learning resources yet</h2><p>Your tutor can provide resources through your parent-managed learning arrangement.</p></StatePanel> : visible.map((r) => <div className="student-resource" key={r.id}>{r.url ? <a href={r.url} target="_blank" rel="noreferrer"><strong>{r.title}</strong></a> : <strong>{r.title}</strong>}{r.description && <p>{r.description}</p>}</div>)}</section></>;
 }
 
 export function StudentProgressPage() {
@@ -237,5 +246,5 @@ export function StudentProfilePage() {
 export function StudentSettingsPage() {
   const navigate = useNavigate();
   const [referralOpen, setReferralOpen] = useState(false);
-  return <main className="student-settings-page"><header><button type="button" className="student-icon-button" onClick={()=>navigate('/student')} aria-label="Back to student dashboard"><ChevronLeftIcon/></button><div><h1>Settings</h1><p>Manage your preferences and find support.</p></div></header><div className="student-settings-grid"><section><UserFieldIcon/><div><h2>Account</h2><p>Your parent manages your profile details and password.</p><span><LockIcon/> Password managed by parent</span></div></section><section><LightbulbIcon/><div><h2>Preferences</h2><p>Choose how Mentora looks on this device.</p><span><ThemeToggle/> Appearance</span></div></section><section><ShieldCheckIcon/><div><h2>Privacy & Safety</h2><p>Your learning account is linked to and managed by your parent.</p><span><ShieldCheckIcon/> Protected student account</span></div></section><section><HelpCircleIcon/><div><h2>Support</h2><p>Ask your parent for account help or contact Mentora support.</p><a href="mailto:helpdesk@mentora.dev"><HelpCircleIcon/> Contact support</a></div></section><section><TrophyIcon/><div><h2>Invite Friends</h2><p>Share Mentora with friends and families. Rewards are not currently available.</p><button type="button" className="btn btn-secondary" onClick={()=>setReferralOpen(true)}>Share Mentora</button></div></section></div><button type="button" className="btn btn-secondary student-settings-signout" onClick={()=>logout(navigate)}><LogOutIcon/> Sign out</button>{referralOpen&&<ReferralModal onClose={()=>setReferralOpen(false)}/>}</main>;
+  return <main className="student-settings-page"><header><button type="button" className="student-icon-button" onClick={()=>navigate('/student')} aria-label="Back to student dashboard"><ChevronLeftIcon/></button><div><h1>Settings</h1><p>Manage your preferences and find support.</p></div></header><div className="student-settings-grid"><section><UserFieldIcon/><div><h2>Account</h2><p>Your parent manages your profile details and password.</p><span><LockIcon/> Password managed by parent</span></div></section><section><LightbulbIcon/><div><h2>Preferences</h2><p>Choose how Mentora looks on this device.</p><span><ThemeToggle/> Appearance</span></div></section><section><ShieldCheckIcon/><div><h2>Privacy & Safety</h2><p>Your learning account is linked to and managed by your parent.</p><span><ShieldCheckIcon/> Protected student account</span></div></section><section><HelpCircleIcon/><div><h2>Support</h2><p>Ask your parent for account help or contact Mentora support.</p><a href="mailto:helpdesk@mentora.dev"><HelpCircleIcon/> Contact support</a></div></section><section><TrophyIcon/><div><h2>Invite Friends</h2><p>Share Mentora with friends and families. Rewards are not currently available.</p><button type="button" className="btn btn-secondary" onClick={()=>setReferralOpen(true)}>Share Mentora</button></div></section></div><LogoutButton className="btn btn-secondary student-settings-signout"><LogOutIcon/> Sign out</LogoutButton>{referralOpen&&<ReferralModal onClose={()=>setReferralOpen(false)}/>}</main>;
 }

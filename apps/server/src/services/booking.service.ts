@@ -122,46 +122,61 @@ export async function createBooking(parentId: string, payload: CreateBookingPayl
     await paymentService.verifyBookingPayment(parentId, payload.paystackReference!, total);
   }
 
-  const booking = await prisma.$transaction(async (tx) => {
-    await assertSlotAvailable(tx, tutor.id, student.id, date, payload.startTime, payload.endTime);
-    const created = await tx.booking.create({
-      data: {
-        parentId,
-        studentId: payload.studentId,
-        tutorId: tutor.id,
-        tutorName: tutor.name,
-        tutorTitle: tutor.tutorProfile!.professionalTitle ?? 'Tutor',
-        tutorPhotoUrl: tutor.tutorProfile!.photoUrl ?? tutor.photoUrl,
-        subject: payload.subject,
-        specificTopic: payload.specificTopic,
-        format: payload.format,
-        date,
-        startTime: payload.startTime,
-        endTime: payload.endTime,
-        message: payload.message,
-        price,
-        platformFee,
-        total,
-      },
-      include: { student: true },
-    });
+  let booking: BookingWithStudent;
+  try {
+    booking = await prisma.$transaction(async (tx) => {
+      await assertSlotAvailable(tx, tutor.id, student.id, date, payload.startTime, payload.endTime);
+      const created = await tx.booking.create({
+        data: {
+          parentId,
+          studentId: payload.studentId,
+          tutorId: tutor.id,
+          tutorName: tutor.name,
+          tutorTitle: tutor.tutorProfile!.professionalTitle ?? 'Tutor',
+          tutorPhotoUrl: tutor.tutorProfile!.photoUrl ?? tutor.photoUrl,
+          subject: payload.subject,
+          specificTopic: payload.specificTopic,
+          format: payload.format,
+          date,
+          startTime: payload.startTime,
+          endTime: payload.endTime,
+          message: payload.message,
+          price,
+          platformFee,
+          total,
+        },
+        include: { student: true },
+      });
 
+      if (payload.paymentSource === 'CARD') {
+        await paymentService.attachBookingToCardPayment(tx, payload.paystackReference!, created.id);
+      } else {
+        await paymentService.chargeWalletForBooking(tx, parentId, created.id, total);
+      }
+
+      await tx.notification.create({
+        data: {
+          userId: parentId,
+          title: 'Payment successful',
+          body: `Your payment for ${payload.subject} with ${tutor.name} was successful.`,
+        },
+      });
+
+      return created;
+    }, { isolationLevel: 'Serializable' });
+  } catch (err) {
+    // The card was already verified/captured before this transaction ran (see
+    // verifyBookingPayment above) — if the booking itself couldn't be created (e.g. someone
+    // else took the slot in that instant), refund the now-orphaned charge rather than leaving
+    // it captured with no booking attached. Wallet payments don't need this: the debit happens
+    // inside this same transaction, so it rolls back automatically.
     if (payload.paymentSource === 'CARD') {
-      await paymentService.attachBookingToCardPayment(tx, payload.paystackReference!, created.id);
-    } else {
-      await paymentService.chargeWalletForBooking(tx, parentId, created.id, total);
+      await paymentService.refundOrphanedCardPayment(payload.paystackReference!).catch((refundErr) => {
+        console.error('[booking] Failed to auto-refund an orphaned verified payment:', payload.paystackReference, refundErr);
+      });
     }
-
-    await tx.notification.create({
-      data: {
-        userId: parentId,
-        title: 'Payment successful',
-        body: `Your payment for ${payload.subject} with ${tutor.name} was successful.`,
-      },
-    });
-
-    return created;
-  }, { isolationLevel: 'Serializable' });
+    throw err;
+  }
 
   return toBooking(booking);
 }

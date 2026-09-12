@@ -1,5 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { MENTORA_FAQS } from '../data/helpContent';
+import { useAuth, roleHome } from '../context/AuthContext';
 
 type Section = { title: string; body: string };
 
@@ -35,12 +36,16 @@ const PRIVACY: Section[] = [
 
 export function LegalHelpPage({ kind }: { kind: 'terms' | 'privacy' | 'faq' }) {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const title = kind === 'terms' ? 'Terms & Conditions' : kind === 'privacy' ? 'Privacy Policy' : 'Frequently Asked Questions';
   const intro = kind === 'faq' ? 'Answers to common questions about using Mentora.' : 'Draft for product review. Legal counsel must review this content before production launch.';
   const closePage = () => {
     const historyIndex = Number(window.history.state?.idx ?? 0);
-    if (historyIndex > 0) navigate(-1);
-    else navigate('/', { replace: true });
+    if (historyIndex > 0) { navigate(-1); return; }
+    // No real history to go back to (e.g. a fresh page load or direct link) — for a
+    // signed-in user this must land back in their own dashboard, never the public
+    // landing page, which would look like an unexpected sign-out.
+    navigate(user ? roleHome(user.role) : '/', { replace: true });
   };
 
   return <main className="legal-page"><header><Link className="legal-brand-link" to="/">Mentora</Link><div className="legal-header-actions"><Link to="/login">Sign in</Link><button type="button" className="legal-close-button" onClick={closePage} aria-label={`Close ${title}`}><span aria-hidden="true">×</span> Close</button></div></header><article><p className="legal-eyebrow">Mentora Help & Legal</p><h1>{title}</h1><p className="legal-intro">{intro}</p>{kind === 'faq' ? <div className="faq-list">{MENTORA_FAQS.map(([question, answer]) => <details key={question}><summary>{question}</summary><p>{answer}</p></details>)}</div> : <div className="legal-sections">{(kind === 'terms' ? TERMS : PRIVACY).map((section) => <section key={section.title}><h2>{section.title}</h2><p>{section.body}</p></section>)}</div>}<footer><Link to="/terms">Terms & Conditions</Link><Link to="/privacy">Privacy Policy</Link><Link to="/help/faq">FAQ</Link><a href="mailto:helpdesk@mentora.dev">Contact support</a></footer></article></main>;

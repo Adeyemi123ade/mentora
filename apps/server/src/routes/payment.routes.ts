@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { validate } from '../middleware/validate.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { requireRole } from '../middleware/requireRole.js';
+import { paymentInitializeRateLimit } from '../middleware/rateLimit.js';
 import { asyncHandler } from '../lib/asyncHandler.js';
 import { initializePaymentSchema, confirmReferenceSchema } from '../validation/payment.schemas.js';
 import * as paymentService from '../services/payment.service.js';
@@ -9,7 +10,7 @@ import * as paymentService from '../services/payment.service.js';
 const router = Router();
 router.use(requireAuth, requireRole('PARENT'));
 
-router.post('/initialize', validate(initializePaymentSchema), asyncHandler(async (req: Request, res: Response) => {
+router.post('/initialize', paymentInitializeRateLimit, validate(initializePaymentSchema), asyncHandler(async (req: Request, res: Response) => {
   const result = await paymentService.initializePayment(req.user!.id, req.user!.email, req.body.amount, req.body.purpose);
   res.status(201).json({ success: true, message: 'Payment initialized', data: result });
 }));

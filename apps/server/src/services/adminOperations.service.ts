@@ -19,7 +19,7 @@ export async function dashboard() {
     prisma.transaction.aggregate({ where: { status: 'SUCCESS', createdAt: { gte: weekStart } }, _sum: { amount: true } }),
     prisma.dispute.count({ where: { status: { in: ['OPEN', 'UNDER_REVIEW'] } } }),
     prisma.supportTicket.count({ where: { status: { in: ['OPEN', 'IN_PROGRESS'] } } }),
-    prisma.user.findMany({ take: 5, orderBy: { createdAt: 'desc' }, select: { id: true, name: true, role: true, photoUrl: true, createdAt: true } }),
+    prisma.user.findMany({ take: 5, orderBy: { createdAt: 'desc' }, select: { id: true, name: true, email: true, role: true, accountStatus: true, photoUrl: true, createdAt: true } }),
   ]);
   return { metrics: { users, parents, students, tutors, pendingTutors, bookings, paymentVolume: volume._sum.amount ?? 0, openDisputes, openTickets }, recentBookings, recentUsers };
 }
@@ -37,16 +37,61 @@ export async function globalSearch(query: string) {
   return { users, bookings, payments, disputes, tickets };
 }
 
+const DELETED_SUSPENSION_REASON = 'Account deleted by user';
+
 export async function listUsers(params: { page?: number; pageSize?: number; q?: string; role?: string; status?: string }) {
+  const isDeleted = params.status === 'DELETED';
   const where: Prisma.UserWhereInput = {
-    ...(params.role ? { role: params.role as never } : {}), ...(params.status ? { accountStatus: params.status as never } : {}),
+    ...(params.role ? { role: params.role as never } : {}),
+    ...(isDeleted ? { accountStatus: 'DEACTIVATED', suspensionReason: DELETED_SUSPENSION_REASON } : params.status ? { accountStatus: params.status as never } : {}),
     ...(params.q ? { OR: [{ name: { contains: params.q, mode: 'insensitive' } }, { email: { contains: params.q, mode: 'insensitive' } }] } : {}),
   };
   const [items, total] = await Promise.all([
-    prisma.user.findMany({ where, ...pageArgs(params.page, params.pageSize), orderBy: { createdAt: 'desc' }, select: { id: true, name: true, email: true, role: true, accountStatus: true, emailVerified: true, photoUrl: true, createdAt: true, loginEvents: { take: 1, orderBy: { createdAt: 'desc' }, select: { createdAt: true } } } }),
+    prisma.user.findMany({ where, ...pageArgs(params.page, params.pageSize), orderBy: { createdAt: 'desc' }, select: { id: true, name: true, email: true, role: true, accountStatus: true, emailVerified: true, photoUrl: true, phone: true, createdAt: true, suspendedAt: true, loginEvents: { take: 1, orderBy: { createdAt: 'desc' }, select: { createdAt: true } } } }),
     prisma.user.count({ where }),
   ]);
-  return { items: items.map(x => ({ ...x, publicId: publicId(x.role, x.id), lastActive: x.loginEvents[0]?.createdAt ?? null, loginEvents: undefined })), total };
+  return { items: items.map(x => ({ ...x, publicId: publicId(x.role, x.id), lastActive: x.loginEvents[0]?.createdAt ?? null, deletedAt: isDeleted ? x.suspendedAt : undefined, loginEvents: undefined })), total };
+}
+
+export async function getUserDetail(userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true, name: true, email: true, role: true, accountStatus: true, emailVerified: true,
+      photoUrl: true, phone: true, location: true, createdAt: true, suspendedAt: true, suspensionReason: true,
+      loginEvents: { take: 1, orderBy: { createdAt: 'desc' }, select: { createdAt: true } },
+    },
+  });
+  if (!user) throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
+
+  const [bookings, tutorProfile, studentInfo, children] = await Promise.all([
+    prisma.booking.findMany({
+      where: { OR: [{ parentId: userId }, { tutorId: userId }] },
+      orderBy: { date: 'desc' },
+      take: 20,
+      select: {
+        id: true, subject: true, status: true, date: true, startTime: true, total: true,
+        student: { select: { fullName: true } },
+        tutor: { select: { name: true } },
+        parent: { select: { name: true } },
+      },
+    }),
+    user.role === 'TUTOR'
+      ? prisma.tutorProfile.findUnique({
+          where: { userId },
+          select: { professionalTitle: true, subjects: true, gradeLevels: true, yearsExperience: true, qualification: true, verificationStatus: true, sessionPrice: true },
+        })
+      : null,
+    user.role === 'STUDENT'
+      ? prisma.student.findFirst({ where: { accountUserId: userId }, select: { fullName: true, age: true, grade: true, interests: true, overallProgress: true } })
+      : null,
+    user.role === 'PARENT'
+      ? prisma.student.findMany({ where: { parentId: userId }, select: { id: true, fullName: true, age: true, grade: true } })
+      : null,
+  ]);
+
+  const { loginEvents, ...rest } = user;
+  return { user: { ...rest, publicId: publicId(user.role, user.id), lastActive: loginEvents[0]?.createdAt ?? null }, bookings, tutorProfile, studentInfo, children };
 }
 
 export async function setUserStatus(adminId: string, userId: string, status: 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED', reason: string) {

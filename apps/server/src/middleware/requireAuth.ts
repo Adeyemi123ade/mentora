@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import prisma from '../db.js';
 import { supabase } from '../lib/supabase.js';
-import { syncUserFromSupabase } from '../services/auth.service.js';
+import { syncUserFromSupabase, metadataHasPassword } from '../services/auth.service.js';
 import { AppError } from '../lib/AppError.js';
 
 function extractBearerToken(req: Request): string | null {
@@ -34,7 +34,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
 
     const user = await prisma.user.findUnique({
       where: { supabaseUserId: supabaseUser.id },
-      select: { id: true, email: true, name: true, role: true, emailVerified: true, supabaseUserId: true, accountStatus: true },
+      select: { id: true, email: true, name: true, role: true, emailVerified: true, hasPassword: true, supabaseUserId: true, accountStatus: true },
     });
 
     if (user) {
@@ -42,11 +42,12 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
         throw new AppError(403, user.accountStatus === 'SUSPENDED' ? 'This account is suspended. Contact Mentora support for help.' : 'This account has been deactivated.', 'ACCOUNT_INACTIVE');
       }
       const emailVerified = Boolean(supabaseUser.email_confirmed_at);
-      if (user.emailVerified !== emailVerified) {
+      const hasPassword = metadataHasPassword(supabaseUser.app_metadata);
+      if (user.emailVerified !== emailVerified || user.hasPassword !== hasPassword) {
         const updated = await prisma.user.update({
           where: { id: user.id },
-          data: { emailVerified },
-          select: { id: true, email: true, name: true, role: true, emailVerified: true, supabaseUserId: true },
+          data: { emailVerified, hasPassword },
+          select: { id: true, email: true, name: true, role: true, emailVerified: true, hasPassword: true, supabaseUserId: true },
         });
         req.user = updated;
       } else {
@@ -64,6 +65,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
       name: synced.name,
       role: synced.role,
       emailVerified: synced.emailVerified,
+      hasPassword: synced.hasPassword,
       supabaseUserId: supabaseUser.id,
     };
     next();

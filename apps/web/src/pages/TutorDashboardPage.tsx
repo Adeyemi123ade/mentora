@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import type {
   TutorProfileDto,
   TutorDashboardSummary,
@@ -9,11 +9,14 @@ import type {
   AvailabilitySlot,
   Notification,
 } from '@mentora/shared';
-import { apiRequest, logout } from '../lib/api';
+import { apiRequest } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { Avatar } from '../components/Avatar';
 import { Modal } from '../components/Modal';
 import { ReferralModal } from '../components/ReferralModal';
+import { ThemeToggle } from '../components/ThemeToggle';
+import { LogoutButton } from '../components/LogoutButton';
+import { TUTOR_SETTINGS_NAV, type Section as TutorSettingsSection } from './TutorSettingsPage';
 import mentoraLogo from '../assets/mentora-logo.jpg';
 import {
   HomeIcon,
@@ -33,6 +36,7 @@ import {
   HelpCircleIcon,
   ChevronRightIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
   EditIcon,
   LightbulbIcon,
 } from '../components/Icons';
@@ -61,6 +65,7 @@ const STATUS_LABEL: Record<string, string> = {
 export function TutorDashboardShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const [profile, setProfile] = useState<TutorProfileDto | null>(null);
   const [unreadMessages, setUnreadMessages] = useState(0);
@@ -104,18 +109,17 @@ export function TutorDashboardShell({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, []);
 
-  async function handleLogout() {
-    await logout(navigate);
-  }
-
   const navItems = NAV_ITEMS.map((item) => (item.path === '/tutor/messages' ? { ...item, badge: unreadMessages || undefined } : item));
   const isDashboardHome = location.pathname === '/tutor';
+  const isSettingsRoute = location.pathname === '/tutor/settings';
+  const requestedSection = searchParams.get('section') as TutorSettingsSection | null;
+  const activeSettingsSection: TutorSettingsSection = TUTOR_SETTINGS_NAV.some((s) => s.id === requestedSection)
+    ? requestedSection!
+    : 'account';
 
   return (
     <div className="tdash-layout">
       <aside className="tdash-sidebar">
-        <div className="dash-brand"><img src={mentoraLogo} alt="" aria-hidden="true" className="brand-logo-img" /><span>Mentora</span></div>
-
         <Link to="/tutor/profile" className="tdash-profile-card">
           <Avatar name={user?.name ?? ''} photoUrl={user?.photoUrl} className="tdash-profile-avatar" />
           <div className="tdash-profile-info">
@@ -129,54 +133,76 @@ export function TutorDashboardShell({ children }: { children: ReactNode }) {
           </div>
         </Link>
 
-        <nav className="tdash-nav" aria-label="Tutor dashboard navigation">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = location.pathname === item.path;
-            return (
-              <Link key={item.path} to={item.path} className={active ? 'tdash-nav-link active' : 'tdash-nav-link'}>
-                <Icon /> <span>{item.label}</span>
-                {item.badge ? <span className="dash-nav-badge">{item.badge}</span> : null}
-              </Link>
-            );
-          })}
-        </nav>
+        {isSettingsRoute ? (
+          <nav className="tdash-nav" aria-label="Settings navigation">
+            <Link to="/tutor" className="tdash-nav-link tdash-nav-back">
+              <ChevronLeftIcon className="tdash-nav-back-icon" /> <span>Back to Dashboard</span>
+            </Link>
+            {TUTOR_SETTINGS_NAV.map((item) => {
+              const Icon = item.icon;
+              const active = item.id === activeSettingsSection;
+              return (
+                <Link
+                  key={item.id}
+                  to={`/tutor/settings?section=${item.id}`}
+                  className={active ? 'tdash-nav-link active' : 'tdash-nav-link'}
+                >
+                  <Icon /> <span>{item.title}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        ) : (
+          <nav className="tdash-nav" aria-label="Tutor dashboard navigation">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const active = location.pathname === item.path;
+              return (
+                <Link key={item.path} to={item.path} className={active ? 'tdash-nav-link active' : 'tdash-nav-link'}>
+                  <Icon /> <span>{item.label}</span>
+                  {item.badge ? <span className="dash-nav-badge">{item.badge}</span> : null}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
 
-        <div className="dash-refer-card tdash-grow-card">
-          <span className="dash-refer-icon"><DiamondIcon /></span>
-          <strong>Grow your tutoring business</strong>
-          <span>Keep your profile updated and get more students.</span>
-          <div className="tdash-grow-progress">
-            <div className="tdash-grow-bar"><span style={{ width: `${strength?.percent ?? 0}%` }} /></div>
-            <em>{strength?.percent ?? 0}% complete</em>
-          </div>
-          <Link to="/tutor/profile" className="btn btn-secondary full">Improve profile <ChevronRightIcon /></Link>
-        </div>
+        {!isSettingsRoute && (
+          <>
+            <div className="dash-refer-card tdash-grow-card">
+              <span className="dash-refer-icon"><DiamondIcon /></span>
+              <strong>Grow your tutoring business</strong>
+              <span>Keep your profile updated and get more students.</span>
+              <div className="tdash-grow-progress">
+                <div className="tdash-grow-bar"><span style={{ width: `${strength?.percent ?? 0}%` }} /></div>
+                <em>{strength?.percent ?? 0}% complete</em>
+              </div>
+              <Link to="/tutor/profile" className="btn btn-secondary full">Improve profile <ChevronRightIcon /></Link>
+            </div>
 
-        <button type="button" className="btn btn-secondary full" onClick={() => setReferralOpen(true)}>Invite Friends</button>
+            <button type="button" className="btn btn-secondary full" onClick={() => setReferralOpen(true)}>Invite Friends</button>
 
-        <a href="mailto:support@mentora.app" className="tdash-help-link"><HelpCircleIcon /> Need help? <span>Visit our Help Center</span></a>
+            <a href="mailto:support@mentora.app" className="tdash-help-link"><HelpCircleIcon /> Need help? <span>Visit our Help Center</span></a>
+          </>
+        )}
 
-        <button type="button" className="tdash-logout" onClick={handleLogout}><LogOutIcon /> Log Out</button>
+        <LogoutButton className="tdash-logout"><LogOutIcon /> Log Out</LogoutButton>
       </aside>
 
       <div className="tdash-content-col">
-        <header className={isDashboardHome ? 'tdash-topbar' : 'tdash-topbar tdash-topbar-compact'}>
-          <div>
-            <h1>Welcome back, {user?.name.split(' ')[0]} 👋</h1>
-            <p>Here's what's happening with your tutoring business today.</p>
-          </div>
+        <header className="tdash-topbar">
+          <Link to="/tutor" className="tdash-topbar-brand">
+            <img src={mentoraLogo} alt="" aria-hidden="true" className="brand-logo-img" />
+            <span>Mentora</span>
+          </Link>
           <div className="tdash-topbar-actions">
+            <ThemeToggle />
             <Link to="/tutor/notifications" className="dash-bell" aria-label="Notifications">
               <BellIcon />
               {unreadNotifications > 0 && <span className="dash-bell-badge">{unreadNotifications > 9 ? '9+' : unreadNotifications}</span>}
             </Link>
             <Link to="/tutor/profile" className="tdash-topbar-user">
               <Avatar name={user?.name ?? ''} photoUrl={user?.photoUrl} className="tdash-topbar-avatar" />
-              <span className="tdash-topbar-user-info">
-                <strong>{user?.name}</strong>
-                <em>{profile?.professionalTitle ?? 'Tutor'}</em>
-              </span>
               <ChevronDownIcon />
             </Link>
           </div>
@@ -189,7 +215,15 @@ export function TutorDashboardShell({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className="tdash-main">{children}</main>
+        <main className="tdash-main">
+          {isDashboardHome && (
+            <div className="tdash-welcome">
+              <h1>Welcome back, {user?.name.split(' ')[0]} 👋</h1>
+              <p>Here's what's happening with your tutoring business today.</p>
+            </div>
+          )}
+          {children}
+        </main>
       </div>
       {referralOpen && <ReferralModal onClose={() => setReferralOpen(false)} />}
     </div>

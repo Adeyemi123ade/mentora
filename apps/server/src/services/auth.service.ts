@@ -17,11 +17,22 @@ function toUserSummary(user: User): UserSummary {
     name: user.name,
     role: user.role,
     emailVerified: user.emailVerified,
+    hasPassword: user.hasPassword,
     photoUrl: user.photoUrl,
     phone: user.phone,
     location: user.location,
     createdAt: user.createdAt.toISOString(),
   };
+}
+
+/**
+ * Supabase links an 'email' identity (and adds it to app_metadata.providers) the moment
+ * a password is set on an account — whether at signup or later via password reset — so
+ * this stays accurate for Google-only accounts without a separate local flag to maintain.
+ */
+export function metadataHasPassword(metadata: Record<string, unknown> | undefined): boolean {
+  const providers = metadata?.providers;
+  return Array.isArray(providers) && providers.includes('email');
 }
 
 function metadataName(metadata: Record<string, unknown> | undefined, fallback: string): string {
@@ -54,6 +65,7 @@ export async function syncUserFromSupabase(
   const name = metadataName(supabaseUser.user_metadata, email.split('@')[0] || 'Mentora user');
   const photoUrl = metadataPhotoUrl(supabaseUser.user_metadata);
   const emailVerified = Boolean(supabaseUser.email_confirmed_at);
+  const hasPassword = metadataHasPassword(supabaseUser.app_metadata);
 
   let user = await prisma.user.findUnique({ where: { supabaseUserId: supabaseUser.id } });
 
@@ -70,6 +82,15 @@ export async function syncUserFromSupabase(
       const pendingInvite = await prisma.adminInvite.findUnique({ where: { email } });
       const isAcceptingAdminInvite = pendingInvite?.status === 'PENDING';
 
+      // A Supabase identity that already has a password credential (set at signup, via
+      // password reset, or after a first Google login) can only reach this "create new
+      // local user" branch if its matching local User row is missing — every path that
+      // sets a password creates that row synchronously in the same request. That
+      // combination should be impossible unless the local row was deleted directly in
+      // Supabase, outside the app, so it's traced rather than silently re-created as if
+      // this were a genuine first-time signup.
+      const isOrphanedReemergence = hasPassword && !isAcceptingAdminInvite;
+
       user = await prisma.user.create({
         data: {
           supabaseUserId: supabaseUser.id,
@@ -80,6 +101,7 @@ export async function syncUserFromSupabase(
           role: isAcceptingAdminInvite ? 'ADMIN' : (metadataRole(supabaseUser.app_metadata) ?? 'PARENT'),
           photoUrl,
           emailVerified,
+          hasPassword,
         },
       });
 
@@ -89,6 +111,10 @@ export async function syncUserFromSupabase(
           data: { status: 'ACCEPTED', acceptedAt: new Date() },
         });
       }
+
+      if (isOrphanedReemergence) {
+        await traceOrphanedReemergence(email, supabaseUser.id);
+      }
     }
   }
 
@@ -96,7 +122,8 @@ export async function syncUserFromSupabase(
   const emailChanged = user.email !== email;
   const photoChanged = photoUrl !== null && user.photoUrl !== photoUrl;
   const verificationChanged = user.emailVerified !== emailVerified;
-  if (nameChanged || emailChanged || photoChanged || verificationChanged) {
+  const hasPasswordChanged = user.hasPassword !== hasPassword;
+  if (nameChanged || emailChanged || photoChanged || verificationChanged || hasPasswordChanged) {
     user = await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -104,11 +131,36 @@ export async function syncUserFromSupabase(
         email: emailChanged ? email : user.email,
         photoUrl: photoChanged ? photoUrl : user.photoUrl,
         emailVerified,
+        hasPassword,
       },
     });
   }
 
   return toUserSummary(user);
+}
+
+/**
+ * Best-effort trace for an account that reappeared with no local history (see the
+ * isOrphanedReemergence comment above) — logs server-side and notifies every admin, so there's
+ * a visible record even though the original booking/message history genuinely can't be
+ * recovered. Never allowed to fail the sign-in itself.
+ */
+async function traceOrphanedReemergence(email: string, supabaseUserId: string): Promise<void> {
+  try {
+    console.warn(`[auth] Re-created a local account for ${email} (supabaseUserId ${supabaseUserId}) with no matching prior record — this account already had a password set in Supabase, which should be impossible unless its local record was deleted outside the app.`);
+    const admins = await prisma.user.findMany({ where: { role: 'ADMIN' }, select: { id: true } });
+    if (admins.length) {
+      await prisma.notification.createMany({
+        data: admins.map((admin) => ({
+          userId: admin.id,
+          title: 'Account re-created with no history',
+          body: `${email} just signed in but had no local record, even though their Supabase login already had a password set. Their account was likely deleted directly in Supabase rather than through the app — their prior booking/message history could not be recovered.`,
+        })),
+      });
+    }
+  } catch (err) {
+    console.error('[auth] Failed to record the orphaned-reemergence trace:', err);
+  }
 }
 
 export async function getMe(userId: string): Promise<UserSummary> {
@@ -192,11 +244,11 @@ export async function signup(payload: SignupPayload): Promise<UserSummary> {
   if (user) {
     user = await prisma.user.update({
       where: { id: user.id },
-      data: { supabaseUserId: authUser.id, emailVerified: false, role },
+      data: { supabaseUserId: authUser.id, emailVerified: false, hasPassword: true, role },
     });
   } else {
     user = await prisma.user.create({
-      data: { supabaseUserId: authUser.id, email, name, role, emailVerified: false },
+      data: { supabaseUserId: authUser.id, email, name, role, emailVerified: false, hasPassword: true },
     });
   }
 
@@ -205,10 +257,27 @@ export async function signup(payload: SignupPayload): Promise<UserSummary> {
   return toUserSummary(user);
 }
 
+// Per-email cooldown for OTP sends, independent of the per-IP rate limiter on the
+// /resend-otp route (rateLimit.ts) — that one protects against one IP hammering many
+// addresses; this one protects a single address from being flooded from many IPs/devices.
+// In-memory by design, matching the existing rate-limit middleware's storage model.
+// Matches the 30s countdown already shown in the frontend's resend button (App.tsx)
+// so a user who waits out the visible timer never hits this as a surprise 429.
+const OTP_EMAIL_COOLDOWN_MS = 30_000;
+const lastOtpSentAt = new Map<string, number>();
+
 /** Generates a Supabase OTP and sends it through the API-owned SMTP provider. */
 export async function sendSignupOtp(email: string): Promise<void> {
   if (!supabaseAdmin) {
     throw new AppError(503, 'Sign-up is not configured on this server yet', 'ADMIN_NOT_CONFIGURED');
+  }
+
+  const key = email.trim().toLowerCase();
+  const lastSent = lastOtpSentAt.get(key);
+  const now = Date.now();
+  if (lastSent && now - lastSent < OTP_EMAIL_COOLDOWN_MS) {
+    const waitSeconds = Math.ceil((OTP_EMAIL_COOLDOWN_MS - (now - lastSent)) / 1000);
+    throw new AppError(429, `Please wait ${waitSeconds}s before requesting another code.`, 'OTP_COOLDOWN');
   }
 
   const { data, error } = await supabaseAdmin.auth.admin.generateLink({
@@ -225,6 +294,7 @@ export async function sendSignupOtp(email: string): Promise<void> {
   }
 
   await sendVerificationEmail(email, data.properties.email_otp);
+  lastOtpSentAt.set(key, now);
 }
 
 /**

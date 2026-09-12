@@ -12,7 +12,6 @@ import {
   TUTOR_SESSION_DURATIONS,
 } from '@mentora/shared';
 import { apiRequest, ApiError } from '../lib/api';
-import { Avatar } from '../components/Avatar';
 import { MultiSelectField } from '../components/MultiSelectField';
 import { DocumentUploader } from '../components/DocumentUploader';
 import tutorOnboardingIllustration from '../assets/tutor-onboarding.png';
@@ -281,7 +280,6 @@ export function TutorCompleteProfilePage({ editMode = false }: { editMode?: bool
                 invalidMessage={fieldErrors.photoUrl}
                 required
               />
-              {profile?.photoUrl && <Avatar name={professionalTitle || 'Tutor'} photoUrl={profile.photoUrl} className="tutor-onb-photo-preview" />}
             </div>
 
             <div className="tutor-onb-grid-2">

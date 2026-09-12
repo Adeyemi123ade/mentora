@@ -8,6 +8,7 @@ type Row = {
   status: 'PENDING' | 'SUCCESS' | 'FAILED' | 'REFUNDED';
   reference: string;
   bookingId: string | null;
+  source?: 'CARD' | 'WALLET';
 };
 
 let rows: Row[] = [];
@@ -33,7 +34,7 @@ vi.mock('../db.js', () => ({ default: db }));
 const paystackMock = vi.hoisted(() => ({ paystackFetch: vi.fn() }));
 vi.mock('../lib/paystack.js', () => paystackMock);
 
-import { verifyBookingPayment, handleWebhookEvent } from './payment.service.js';
+import { verifyBookingPayment, handleWebhookEvent, refundOrphanedCardPayment } from './payment.service.js';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -49,9 +50,8 @@ beforeEach(() => {
   db.transaction.updateMany.mockImplementation(async ({ where, data }: any) => {
     let count = 0;
     for (const row of rows) {
-      const matchesReference = row.reference === where.reference;
-      const matchesStatus = where.status === undefined || row.status === where.status;
-      if (matchesReference && matchesStatus) {
+      const matches = Object.entries(where).every(([key, value]) => value === undefined || (row as any)[key] === value);
+      if (matches) {
         Object.assign(row, data);
         count++;
       }
@@ -141,5 +141,42 @@ describe('handleWebhookEvent', () => {
 
   it('is a no-op for a reference that does not exist locally (never throws)', async () => {
     await expect(handleWebhookEvent({ event: 'charge.success', data: { reference: 'never-created' } })).resolves.toBeUndefined();
+  });
+});
+
+describe('refundOrphanedCardPayment', () => {
+  it('refunds a verified card payment that never got attached to a booking', async () => {
+    seed({ reference: 'ref_orphan', userId: 'parent-1', amount: 5500, type: 'BOOKING_PAYMENT', source: 'CARD' });
+    paystackMock.paystackFetch.mockResolvedValue({});
+
+    await refundOrphanedCardPayment('ref_orphan');
+
+    expect(paystackMock.paystackFetch).toHaveBeenCalledWith('/refund', expect.objectContaining({ method: 'POST' }));
+    expect(rows.find((r) => r.reference === 'ref_orphan')?.status).toBe('REFUNDED');
+  });
+
+  it('reverts the claim back to PENDING (not silently REFUNDED) if the Paystack refund call fails', async () => {
+    seed({ reference: 'ref_orphan_fail', userId: 'parent-1', amount: 5500, type: 'BOOKING_PAYMENT', source: 'CARD' });
+    paystackMock.paystackFetch.mockRejectedValue(new Error('Paystack unavailable'));
+
+    await expect(refundOrphanedCardPayment('ref_orphan_fail')).rejects.toThrow('Paystack unavailable');
+    expect(rows.find((r) => r.reference === 'ref_orphan_fail')?.status).toBe('PENDING');
+  });
+
+  it('does not double-refund a payment that already has a booking attached', async () => {
+    seed({ reference: 'ref_attached', userId: 'parent-1', amount: 5500, type: 'BOOKING_PAYMENT', source: 'CARD', bookingId: 'booking-1' });
+
+    await refundOrphanedCardPayment('ref_attached');
+
+    expect(paystackMock.paystackFetch).not.toHaveBeenCalled();
+    expect(rows.find((r) => r.reference === 'ref_attached')?.status).toBe('PENDING');
+  });
+
+  it('is a no-op for a wallet payment (nothing to refund via Paystack)', async () => {
+    seed({ reference: 'ref_wallet', userId: 'parent-1', amount: 5500, type: 'BOOKING_PAYMENT', source: 'WALLET' });
+
+    await refundOrphanedCardPayment('ref_wallet');
+
+    expect(paystackMock.paystackFetch).not.toHaveBeenCalled();
   });
 });

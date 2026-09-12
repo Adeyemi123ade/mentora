@@ -32,7 +32,7 @@ import {
 
 const PROFILE_FOOTER_COLUMNS: FooterColumn[] = [
   { heading: 'Platform', items: ['Find a Tutor', 'How it Works', 'Pricing', 'FAQs'] },
-  { heading: 'For Parents', items: ['My Students', 'My Bookings', 'Messages', 'Saved Tutors'] },
+  { heading: 'For Parents', items: ['My Children', 'My Bookings', 'Messages', 'Saved Tutors'] },
   { heading: 'For Tutors', items: ['Become a Tutor', 'Tutor Dashboard', 'Resources', 'Community'] },
   { heading: 'Support', items: ['Help Center', 'Contact Us', 'Privacy Policy', 'Terms of Service'] },
 ];

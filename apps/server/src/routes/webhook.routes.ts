@@ -16,7 +16,9 @@ router.post('/paystack', paystackWebhookRateLimit, asyncHandler(async (req: Requ
   }
 
   const computed = crypto.createHmac('sha512', paystackSecretKey()).update(raw).digest('hex');
-  if (computed !== signature) {
+  const computedBuf = Buffer.from(computed, 'hex');
+  const signatureBuf = Buffer.from(signature, 'hex');
+  if (computedBuf.length !== signatureBuf.length || !crypto.timingSafeEqual(computedBuf, signatureBuf)) {
     throw new AppError(401, 'Invalid webhook signature', 'INVALID_SIGNATURE');
   }
 

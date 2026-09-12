@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import type { UserSummary, UserPreferences, AccountSummary, ActivityOverview, Student } from '@mentora/shared';
 import { apiRequest, ApiError } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -23,8 +23,6 @@ import {
   MailIcon,
   LockIcon,
   PhoneIcon,
-  PinIcon,
-  GraduationCapIcon,
   CalendarIcon,
   ChevronRightIcon,
   CheckIcon,
@@ -46,9 +44,9 @@ const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Admin Account',
 };
 
-type TabKey = 'profile' | 'account' | 'notifications' | 'privacy' | 'payments' | 'parental' | 'preferences' | 'help' | 'about';
+export type TabKey = 'profile' | 'account' | 'notifications' | 'privacy' | 'payments' | 'parental' | 'preferences' | 'help';
 
-const NAV_ITEMS: { key: TabKey; label: string; icon: (p: { className?: string }) => JSX.Element }[] = [
+export const SETTINGS_NAV: { key: TabKey; label: string; icon: (p: { className?: string }) => JSX.Element }[] = [
   { key: 'profile', label: 'Profile', icon: UserFieldIcon },
   { key: 'account', label: 'Account', icon: SettingsIcon },
   { key: 'notifications', label: 'Notifications', icon: BellIcon },
@@ -57,7 +55,6 @@ const NAV_ITEMS: { key: TabKey; label: string; icon: (p: { className?: string })
   { key: 'parental', label: 'Parental Controls', icon: UsersIcon },
   { key: 'preferences', label: 'App Preferences', icon: SlidersIcon },
   { key: 'help', label: 'Help & Support', icon: HelpCircleIcon },
-  { key: 'about', label: 'About Mentora', icon: InfoIcon },
 ];
 
 function formatMemberSince(iso: string): string {
@@ -66,7 +63,9 @@ function formatMemberSince(iso: string): string {
 
 export function SettingsPage() {
   const { user, refreshUser } = useAuth();
-  const [tab, setTab] = useState<TabKey>('profile');
+  const [params] = useSearchParams();
+  const requestedTab = params.get('section') as TabKey | null;
+  const tab: TabKey = SETTINGS_NAV.some((item) => item.key === requestedTab) ? requestedTab! : 'profile';
   const [preferences, setPreferences] = useState<UserPreferences | null>(null);
   const [summary, setSummary] = useState<AccountSummary | null>(null);
   const [overview, setOverview] = useState<ActivityOverview | null>(null);
@@ -94,18 +93,7 @@ export function SettingsPage() {
       <h1 className="settings-title">Settings</h1>
       <p className="settings-subtitle">Manage your account, preferences and app settings.</p>
 
-      <div className="settings-layout">
-        <nav className="settings-nav">
-          {NAV_ITEMS.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button key={item.key} type="button" className={tab === item.key ? 'active' : ''} onClick={() => setTab(item.key)}>
-                <Icon /> {item.label}
-              </button>
-            );
-          })}
-        </nav>
-
+      <div className="settings-main">
         {tab === 'profile' && (
           <ProfileTab
             user={user}
@@ -123,7 +111,6 @@ export function SettingsPage() {
         )}
         {tab === 'preferences' && <AppPreferencesTab />}
         {tab === 'help' && <HelpTab />}
-        {tab === 'about' && <AboutTab />}
       </div>
 
       {editProfileOpen && user && (
@@ -193,7 +180,7 @@ function ProfileTab({
           <div className="settings-summary-list">
             <div className="settings-summary-row"><UserFieldIcon /><div><span>Account Type</span><strong>{user ? (ROLE_LABELS[user.role] ?? user.role) : '—'}</strong></div></div>
             <div className="settings-summary-row"><CalendarIcon /><div><span>Member Since</span><strong>{user ? formatMemberSince(user.createdAt) : '—'}</strong></div></div>
-            <div className="settings-summary-row"><UsersIcon /><div><span>Students</span><strong>{summary?.studentCount ?? '—'} Students</strong></div></div>
+            <div className="settings-summary-row"><UsersIcon /><div><span>Children</span><strong>{summary?.studentCount ?? '—'} Children</strong></div></div>
             <div className="settings-summary-row"><BookIcon /><div><span>Total Bookings</span><strong>{summary?.totalBookings ?? '—'} Bookings</strong></div></div>
           </div>
         </div>
@@ -428,7 +415,7 @@ function DeleteAccountModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="Delete Account" onClose={onClose}>
       <form onSubmit={handleSubmit} className="mystudents-edit-form">
-        <p className="photo-uploader-error">This permanently deletes your account, your students, bookings, reviews and everything else tied to it. This cannot be undone.</p>
+        <p className="photo-uploader-error">This permanently deletes your account, your children's profiles, bookings, reviews and everything else tied to it. This cannot be undone.</p>
         <label className="field"><span>Type DELETE to confirm</span><input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} required /></label>
         {error && <p className="photo-uploader-error">{error}</p>}
         <button type="submit" className="btn settings-btn-danger full" disabled={submitting}>{submitting ? 'Deleting…' : 'Permanently Delete Account'}</button>
@@ -604,10 +591,10 @@ function ParentalControlsTab({
       )}
 
       <section className="dash-card settings-card">
-        <h2>Your Students</h2>
-        <p className="booking-section-hint">Manage each child's profile from My Students.</p>
+        <h2>Your Children</h2>
+        <p className="booking-section-hint">Manage each child's profile from My Children.</p>
         {students === null ? null : students.length === 0 ? (
-          <p className="booking-section-hint">No students added yet.</p>
+          <p className="booking-section-hint">No children added yet.</p>
         ) : (
           <div className="settings-student-list">
             {students.map((s) => (
@@ -674,19 +661,3 @@ function HelpTab() {
   );
 }
 
-function AboutTab() {
-  return (
-    <div className="settings-main">
-      <section className="dash-card settings-card">
-        <h2>About Mentora</h2>
-        <p className="booking-section-hint">Connecting learners with expert tutors for better learning outcomes.</p>
-        <div className="settings-field-row settings-fixed-pref"><span>Version</span><strong>1.0.0</strong></div>
-        <div className="settings-help-links settings-help-links-block">
-          <Link className="settings-help-link-btn" to="/terms"><GraduationCapIcon /> Terms &amp; Conditions <ChevronRightIcon /></Link>
-          <Link className="settings-help-link-btn" to="/privacy"><PinIcon /> Privacy Policy <ChevronRightIcon /></Link>
-        </div>
-      </section>
-
-    </div>
-  );
-}

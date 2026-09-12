@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const db = vi.hoisted(() => ({
-  user: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+  user: { findUnique: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
   adminInvite: { findUnique: vi.fn(), update: vi.fn() },
   student: { findMany: vi.fn() },
   savedTutor: { deleteMany: vi.fn() },
   tutorView: { deleteMany: vi.fn() },
-  notification: { deleteMany: vi.fn() },
+  notification: { deleteMany: vi.fn(), createMany: vi.fn() },
   userPreferences: { deleteMany: vi.fn() },
   paymentMethod: { deleteMany: vi.fn() },
   tutorAvailability: { deleteMany: vi.fn() },
@@ -43,6 +43,7 @@ const createdUser = {
   name: 'invitee',
   role: 'ADMIN',
   emailVerified: true,
+  hasPassword: false,
   photoUrl: null,
   phone: null,
   location: null,
@@ -52,6 +53,8 @@ const createdUser = {
 beforeEach(() => {
   vi.clearAllMocks();
   db.user.findUnique.mockResolvedValue(null); // no existing row by supabaseUserId or email
+  db.user.findMany.mockResolvedValue([]);
+  db.adminInvite.findUnique.mockResolvedValue(null);
 });
 
 describe('syncUserFromSupabase — admin invite promotion', () => {
@@ -93,6 +96,51 @@ describe('syncUserFromSupabase — admin invite promotion', () => {
       expect.objectContaining({ data: expect.objectContaining({ role: 'PARENT' }) })
     );
     expect(db.adminInvite.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('syncUserFromSupabase — orphaned reemergence trace', () => {
+  const supabaseUserWithPassword = { ...supabaseUser, app_metadata: { providers: ['email'] } };
+
+  it('notifies every admin when a password-having Supabase identity has no matching local User row', async () => {
+    db.user.create.mockResolvedValue({ ...createdUser, hasPassword: true });
+    db.user.findMany.mockResolvedValue([{ id: 'admin-1' }, { id: 'admin-2' }]);
+
+    await syncUserFromSupabase(supabaseUserWithPassword);
+
+    expect(db.user.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { role: 'ADMIN' } }));
+    expect(db.notification.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({ userId: 'admin-1', title: 'Account re-created with no history' }),
+        expect.objectContaining({ userId: 'admin-2', title: 'Account re-created with no history' }),
+      ],
+    });
+  });
+
+  it('does not fail the sign-in if notifying admins errors', async () => {
+    db.user.create.mockResolvedValue({ ...createdUser, hasPassword: true });
+    db.user.findMany.mockRejectedValue(new Error('db down'));
+
+    await expect(syncUserFromSupabase(supabaseUserWithPassword)).resolves.toMatchObject({ id: 'user-1' });
+  });
+
+  it('does not trace a genuine first-time Google sign-in (no password set yet)', async () => {
+    db.user.create.mockResolvedValue({ ...createdUser, hasPassword: false });
+
+    await syncUserFromSupabase(supabaseUser); // default app_metadata: {} — no providers
+
+    expect(db.user.findMany).not.toHaveBeenCalled();
+    expect(db.notification.createMany).not.toHaveBeenCalled();
+  });
+
+  it('does not trace a brand-new admin invite acceptance even though it will have a password', async () => {
+    db.adminInvite.findUnique.mockResolvedValue({ id: 'invite-1', status: 'PENDING' });
+    db.user.create.mockResolvedValue({ ...createdUser, role: 'ADMIN', hasPassword: true });
+
+    await syncUserFromSupabase(supabaseUserWithPassword);
+
+    expect(db.user.findMany).not.toHaveBeenCalled();
+    expect(db.notification.createMany).not.toHaveBeenCalled();
   });
 });
 

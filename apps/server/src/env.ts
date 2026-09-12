@@ -29,6 +29,10 @@ const schema = z.object({
   BREVO_SMTP_KEY: z.string().optional(),
   BREVO_SENDER_EMAIL: z.string().optional(),
   BREVO_API_KEY: z.string().optional(),
+  GOOGLE_OAUTH_CLIENT_ID: z.string().optional(),
+  GOOGLE_OAUTH_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_OAUTH_REFRESH_TOKEN: z.string().optional(),
+  GOOGLE_SENDER_EMAIL: z.string().optional(),
 });
 
 export const env = schema.parse(process.env);

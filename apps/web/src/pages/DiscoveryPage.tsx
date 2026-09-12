@@ -286,7 +286,7 @@ export function DiscoveryPage() {
           <p>
             {activeStudent
               ? 'Search, compare and connect with verified tutors.'
-              : 'Add a student profile to receive personalized tutor recommendations.'}
+              : 'Add a child profile to receive personalized tutor recommendations.'}
           </p>
         </div>
         <Link to="/dashboard/saved" className="btn btn-secondary disc-saved-link">

@@ -139,7 +139,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function verifyEmailOtp(email: string, token: string): Promise<AppUser> {
-    const { error } = await supabase.auth.verifyOtp({ email, token, type: 'email' });
+    // Must match the type used to generate the code (sendSignupOtp uses 'magiclink') — a
+    // mismatched type still authenticates the code but does not permanently confirm the
+    // account, so every later password login would keep failing with "Email not confirmed".
+    const { error } = await supabase.auth.verifyOtp({ email, token, type: 'magiclink' });
     if (error) throw error;
     const profile = await refreshUser();
     if (!profile) throw new Error('Could not load your profile after verification.');

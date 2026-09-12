@@ -35,6 +35,7 @@ const paymentServiceMock = vi.hoisted(() => ({
   verifyBookingPayment: vi.fn(),
   attachBookingToCardPayment: vi.fn(),
   chargeWalletForBooking: vi.fn(),
+  refundOrphanedCardPayment: vi.fn(),
 }));
 vi.mock('./payment.service.js', () => paymentServiceMock);
 
@@ -92,6 +93,7 @@ describe('createBooking', () => {
       student,
     });
     (db as any).notification = { create: vi.fn().mockResolvedValue({}) };
+    paymentServiceMock.refundOrphanedCardPayment.mockResolvedValue(undefined);
   });
 
   it('creates a booking end-to-end for a valid wallet payment (morning slot, 09:00-10:00)', async () => {
@@ -159,6 +161,22 @@ describe('createBooking', () => {
   it('reports a distinct conflict message when the student (not the tutor) is double-booked', async () => {
     db.booking.findFirst.mockResolvedValue({ tutorId: 'some-other-tutor' });
     await expect(createBooking('parent-1', validPayload)).rejects.toMatchObject({ statusCode: 409, code: 'BOOKING_CONFLICT' });
+  });
+
+  it('auto-refunds an already-verified card payment if the booking transaction itself fails (e.g. slot taken in that instant)', async () => {
+    db.$transaction.mockRejectedValueOnce(new Error('serialization failure'));
+
+    await expect(createBooking('parent-1', { ...validPayload, paymentSource: 'CARD', paystackReference: 'ref_race' })).rejects.toThrow('serialization failure');
+
+    expect(paymentServiceMock.refundOrphanedCardPayment).toHaveBeenCalledWith('ref_race');
+  });
+
+  it('does not attempt a refund for a wallet payment when the booking transaction fails (the debit rolls back with it)', async () => {
+    db.$transaction.mockRejectedValueOnce(new Error('serialization failure'));
+
+    await expect(createBooking('parent-1', validPayload)).rejects.toThrow('serialization failure');
+
+    expect(paymentServiceMock.refundOrphanedCardPayment).not.toHaveBeenCalled();
   });
 });
 

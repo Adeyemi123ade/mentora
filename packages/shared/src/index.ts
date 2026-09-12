@@ -18,6 +18,7 @@ export type UserSummary = {
   name: string;
   role: Role;
   emailVerified: boolean;
+  hasPassword: boolean;
   photoUrl: string | null;
   phone: string | null;
   location: string | null;

@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import type { Student, Notification, Booking, PublicTutorDto, SavedTutor } from '@mentora/shared';
 import mentoraLogo from '../assets/mentora-logo.jpg';
-import { apiRequest, ApiError, logout } from '../lib/api';
+import { apiRequest, ApiError } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { Avatar } from '../components/Avatar';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { ReferralModal } from '../components/ReferralModal';
+import { LogoutButton } from '../components/LogoutButton';
+import { SETTINGS_NAV, type TabKey } from './SettingsPage';
 import { formatBookingDate } from '../lib/scheduling';
 import {
   HomeIcon,
@@ -22,6 +24,7 @@ import {
   BellIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ChevronLeftIcon,
   DiamondIcon,
   MathIcon,
   BriefcaseIcon,
@@ -46,7 +49,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Find a Tutor', icon: SearchIcon, path: '/dashboard/tutors' },
   { label: 'My Bookings', icon: CalendarIcon, path: '/dashboard/bookings' },
   { label: 'Messages', icon: ChatIcon, path: '/dashboard/messages' },
-  { label: 'My Students', icon: UsersIcon, path: '/dashboard/students' },
+  { label: 'My Children', icon: UsersIcon, path: '/dashboard/students' },
   { label: 'Saved Tutors', icon: BookmarkIcon, path: '/dashboard/saved' },
   { label: 'Payments', icon: WalletIcon, path: '/dashboard/payments' },
   { label: 'Settings', icon: SettingsIcon, path: '/dashboard/settings' },
@@ -62,6 +65,7 @@ const ROLE_DISPLAY: Record<string, string> = {
 export function DashboardShell({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
@@ -98,54 +102,81 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   }, [navigate]);
 
   const navItems = NAV_ITEMS.map((item) => (item.path === '/dashboard/messages' ? { ...item, badge: unreadMessages || undefined } : item));
+  const isSettingsRoute = location.pathname === '/dashboard/settings';
+  const requestedSection = searchParams.get('section') as TabKey | null;
+  const activeSettingsSection: TabKey = SETTINGS_NAV.some((s) => s.key === requestedSection) ? requestedSection! : 'profile';
 
   return (
     <div className={`dash-layout ${isHome ? 'dash-home-layout' : 'dash-internal-layout'}`}>
       {sidebarOpen && <div className="dash-sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-hidden="true" />}
 
       <aside className={sidebarOpen ? 'dash-sidebar open' : 'dash-sidebar'}>
-        <div className="dash-brand">
-          <img src={mentoraLogo} alt="" aria-hidden="true" className="brand-logo-img" />
-          <span>Mentora</span>
-          <button type="button" className="dash-sidebar-close" aria-label="Close menu" onClick={() => setSidebarOpen(false)}>
-            <XIcon />
-          </button>
-        </div>
+        <button type="button" className="dash-sidebar-close" aria-label="Close menu" onClick={() => setSidebarOpen(false)}>
+          <XIcon />
+        </button>
 
-        <nav className="dash-nav" aria-label="Dashboard navigation">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const active = location.pathname === item.path;
-            return (
-              <Link key={item.path} to={item.path} className={active ? 'dash-nav-link active' : 'dash-nav-link'} onClick={() => setSidebarOpen(false)}>
-                <Icon />
-                <span>{item.label}</span>
-                {item.badge ? <span className="dash-nav-badge">{item.badge}</span> : null}
-              </Link>
-            );
-          })}
-        </nav>
+        {isSettingsRoute ? (
+          <nav className="dash-nav" aria-label="Settings navigation">
+            <Link to="/dashboard" className="dash-nav-link dash-nav-back" onClick={() => setSidebarOpen(false)}>
+              <ChevronLeftIcon className="dash-nav-back-icon" />
+              <span>Back to Dashboard</span>
+            </Link>
+            {SETTINGS_NAV.map((item) => {
+              const Icon = item.icon;
+              const active = item.key === activeSettingsSection;
+              return (
+                <Link
+                  key={item.key}
+                  to={`/dashboard/settings?section=${item.key}`}
+                  className={active ? 'dash-nav-link active' : 'dash-nav-link'}
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <Icon />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        ) : (
+          <nav className="dash-nav" aria-label="Dashboard navigation">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const active = location.pathname === item.path;
+              return (
+                <Link key={item.path} to={item.path} className={active ? 'dash-nav-link active' : 'dash-nav-link'} onClick={() => setSidebarOpen(false)}>
+                  <Icon />
+                  <span>{item.label}</span>
+                  {item.badge ? <span className="dash-nav-badge">{item.badge}</span> : null}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
 
-        <div className="dash-refer-card">
-          <span className="dash-refer-icon"><DiamondIcon /></span>
-          <strong>Invite Friends</strong>
-          <p>Share Mentora with parents and learners.</p>
-          <button type="button" className="dash-refer-link" onClick={() => setReferralOpen(true)}>Invite Now <ChevronRightIcon /></button>
-        </div>
+        {!isSettingsRoute && (
+          <>
+            <div className="dash-refer-card">
+              <span className="dash-refer-icon"><DiamondIcon /></span>
+              <strong>Invite Friends</strong>
+              <p>Share Mentora with parents and learners.</p>
+              <button type="button" className="dash-refer-link" onClick={() => setReferralOpen(true)}>Invite Now <ChevronRightIcon /></button>
+            </div>
 
-        <Link to="/dashboard/settings" className="dash-user-switcher" aria-label="Open parent profile and settings">
-          {user ? <Avatar name={user.name} photoUrl={user.photoUrl} className="dash-user-avatar" /> : <span className="initials-avatar dash-user-avatar">…</span>}
-          <span className="dash-user-switcher-text">
-            <strong>{user?.name ?? 'Loading…'}</strong>
-            <span>{user ? (ROLE_DISPLAY[user.role] ?? user.role) : ''}</span>
-          </span>
-          <ChevronDownIcon />
-        </Link>
+            <Link to="/dashboard/settings" className="dash-user-switcher" aria-label="Open parent profile and settings">
+              {user ? <Avatar name={user.name} photoUrl={user.photoUrl} className="dash-user-avatar" /> : <span className="initials-avatar dash-user-avatar">…</span>}
+              <span className="dash-user-switcher-text">
+                <strong>{user?.name ?? 'Loading…'}</strong>
+                <span>{user ? (ROLE_DISPLAY[user.role] ?? user.role) : ''}</span>
+              </span>
+              <ChevronDownIcon />
+            </Link>
+          </>
+        )}
 
-        <button type="button" className="dash-sidebar-logout" onClick={() => logout(navigate)}>
+        <LogoutButton className="dash-sidebar-logout">
           <LogOutIcon />
           <span>Log Out</span>
-        </button>
+        </LogoutButton>
       </aside>
 
       <div className="dash-main">
@@ -185,10 +216,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
 
           <Link to="/dashboard/settings" className="dash-topbar-profile" aria-label="Open parent account settings">
             {user ? <Avatar name={user.name} photoUrl={user.photoUrl} className="dash-topbar-avatar" /> : <span className="initials-avatar dash-topbar-avatar">...</span>}
-            <span className="dash-topbar-profile-copy">
-              <strong>{user?.name ?? 'Parent account'}</strong>
-              <span>Parent</span>
-            </span>
             <ChevronDownIcon />
           </Link>
         </header>
@@ -196,15 +223,6 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         <div className="dash-content">{children}</div>
       </div>
       {referralOpen && <ReferralModal onClose={() => setReferralOpen(false)} />}
-    </div>
-  );
-}
-
-export function ComingSoonPage({ title }: { title: string }) {
-  return (
-    <div className="dash-coming-soon">
-      <h2>{title}</h2>
-      <p>This section is coming soon.</p>
     </div>
   );
 }
@@ -269,7 +287,7 @@ export function DashboardHomePage() {
 
   const firstName = user?.name?.split(' ')[0] ?? 'there';
   const primaryStudent = students && students.length > 0 ? students[0] : null;
-  const studentFirstName = primaryStudent?.fullName.split(' ')[0] ?? 'your student';
+  const studentFirstName = primaryStudent?.fullName.split(' ')[0] ?? 'your child';
   const visibleStudents = students?.slice(0, MAX_STUDENT_AVATARS) ?? [];
   const overflowCount = students ? students.length - visibleStudents.length : 0;
 
@@ -287,7 +305,7 @@ export function DashboardHomePage() {
             </Link>
 
             {primaryStudent && (
-              <div className="dash-students-row" aria-label="Students connected to this parent">
+              <div className="dash-students-row" aria-label="Children connected to this parent">
                 {visibleStudents.map((student) => (
                   <Link
                     key={student.id}
@@ -300,7 +318,7 @@ export function DashboardHomePage() {
                   </Link>
                 ))}
                 {overflowCount > 0 && (
-                  <Link to="/dashboard/students" className="dash-students-row-item dash-students-row-more" aria-label={`View all ${students?.length} students`}>
+                  <Link to="/dashboard/students" className="dash-students-row-item dash-students-row-more" aria-label={`View all ${students?.length} children`}>
                     +{overflowCount}
                   </Link>
                 )}
@@ -311,8 +329,8 @@ export function DashboardHomePage() {
 
         <div className="dash-welcome-copy">
           <h1>Welcome{students && students.length > 0 ? ' back' : ''}, {firstName}!</h1>
-          <p>{students === null ? 'Loading your family learning overview.' : primaryStudent ? 'Manage your students and find the right tutors to help them excel.' : 'Add your first student to get personalized tutor recommendations and start their learning journey.'}</p>
-          {students !== null && <div className="dash-welcome-actions"><Link to="/onboarding/add-student" className="btn btn-primary">Add a Student</Link><Link to="/dashboard/students" className="btn btn-secondary">View Students</Link><Link to="/dashboard/tutors" className="btn btn-secondary">Find a Tutor</Link></div>}
+          <p>{students === null ? 'Loading your family learning overview.' : primaryStudent ? 'Manage your children and find the right tutors to help them excel.' : 'Add your first child to get personalized tutor recommendations and start their learning journey.'}</p>
+          {students !== null && <div className="dash-welcome-actions"><Link to="/onboarding/add-student" className="btn btn-primary">Add a Child</Link><Link to="/dashboard/students" className="btn btn-secondary">View Children</Link><Link to="/dashboard/tutors" className="btn btn-secondary">Find a Tutor</Link></div>}
         </div>
 
       </section>
@@ -425,7 +443,7 @@ export function DashboardHomePage() {
           <span className="dash-sticky-icon"><TrophyIcon /></span>
           <div className="dash-sticky-copy">
             <strong>Unlock {studentFirstName}'s full potential</strong>
-            <span>Connect with expert tutors and give {studentFirstName} the edge {studentFirstName === 'your student' ? 'they deserve' : 'they deserve'}.</span>
+            <span>Connect with expert tutors and give {studentFirstName} the edge they deserve.</span>
           </div>
           <Link to="/dashboard/tutors" className="btn btn-primary">Find a Tutor Now <span aria-hidden="true">→</span></Link>
           <button type="button" className="dash-sticky-close" aria-label="Dismiss" onClick={() => setBannerDismissed(true)}>
